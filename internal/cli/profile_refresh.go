@@ -23,7 +23,10 @@ With no argument, refreshes every profile.`,
 			}
 			var targets []profile.Profile
 			if len(args) == 1 {
-				pr := profile.New(s.Paths, args[0])
+				pr, err := profile.NewChecked(s.Paths, args[0])
+				if err != nil {
+					return err
+				}
 				if !pr.Exists() {
 					return fmt.Errorf("profile %q not found", args[0])
 				}

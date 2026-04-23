@@ -1,6 +1,11 @@
+//go:build !windows
+
 // Package fslock provides an advisory file lock used to serialize ccp state
 // mutations. It wraps the POSIX flock(2) syscall via unix.Flock so two
 // concurrent `ccp use` invocations can't clobber each other.
+//
+// Windows support is tracked in GitHub issue #6 and will live in a sibling
+// fslock_windows.go using LockFileEx via golang.org/x/sys/windows.
 package fslock
 
 import (
@@ -18,7 +23,7 @@ type Lock struct {
 // Acquire takes an exclusive lock on path, creating the file if necessary.
 // It blocks until the lock is available. Call Release() when done.
 func Acquire(path string) (*Lock, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", path, err)
 	}

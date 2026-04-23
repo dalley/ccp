@@ -26,9 +26,9 @@ type DiffEntry struct {
 type DiffKind string
 
 const (
-	DiffOnlyInA   DiffKind = "only-in-a"
-	DiffOnlyInB   DiffKind = "only-in-b"
-	DiffChanged   DiffKind = "changed"
+	DiffOnlyInA      DiffKind = "only-in-a"
+	DiffOnlyInB      DiffKind = "only-in-b"
+	DiffChanged      DiffKind = "changed"
 	DiffTypeMismatch DiffKind = "type-mismatch" // one side file, other side dir
 )
 

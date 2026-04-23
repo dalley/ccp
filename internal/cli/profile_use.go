@@ -19,7 +19,10 @@ func newProfileUseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pr := profile.New(s.Paths, name)
+			pr, err := profile.NewChecked(s.Paths, name)
+			if err != nil {
+				return err
+			}
 			if !pr.Exists() {
 				return fmt.Errorf("profile %q not found (create it with: ccp profile create %s)", name, name)
 			}

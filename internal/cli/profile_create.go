@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dalley/ccp/internal/profile"
 	"github.com/spf13/cobra"
@@ -74,8 +75,14 @@ func newProfileCreateCmd() *cobra.Command {
 // ~/.bashrc if that's what exists, falling back to creating ~/.zshrc.
 func resolveShellrc(home, explicit string) (string, error) {
 	if explicit != "" {
-		if explicit[0] == '~' {
-			explicit = filepath.Join(home, explicit[1:])
+		// Only expand the canonical tilde form "~/..." — treat a bare "~"
+		// or "~name" as literal so a surprising expansion never writes to
+		// the home directory or to a sibling of it.
+		if explicit == "~" {
+			return "", fmt.Errorf("--shellrc cannot be just \"~\" (would target the home directory itself)")
+		}
+		if strings.HasPrefix(explicit, "~/") {
+			explicit = filepath.Join(home, explicit[2:])
 		}
 		return explicit, nil
 	}

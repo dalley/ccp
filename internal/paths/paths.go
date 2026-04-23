@@ -15,14 +15,14 @@ import (
 
 // Paths holds the resolved filesystem layout for one ccp invocation.
 type Paths struct {
-	Home           string // $HOME (or CCP_ROOT when set)
-	ConfigDir      string // ~/.config/ccp (XDG-aware)
-	ProfilesDir    string // <ConfigDir>/profiles
-	BackupsDir     string // <ConfigDir>/backups
-	SecretsDir     string // <ConfigDir>/secrets (reserved for v2)
-	ManifestPath   string // <ConfigDir>/manifest.toml
-	LockPath       string // <ConfigDir>/lock
-	ClaudeHome     string // ~/.claude — Claude's default config directory
+	Home         string // $HOME (or CCP_ROOT when set)
+	ConfigDir    string // ~/.config/ccp (XDG-aware)
+	ProfilesDir  string // <ConfigDir>/profiles
+	BackupsDir   string // <ConfigDir>/backups
+	SecretsDir   string // <ConfigDir>/secrets (reserved for v2)
+	ManifestPath string // <ConfigDir>/manifest.toml
+	LockPath     string // <ConfigDir>/lock
+	ClaudeHome   string // ~/.claude — Claude's default config directory
 }
 
 // Resolve builds a Paths from the current environment. It does not create

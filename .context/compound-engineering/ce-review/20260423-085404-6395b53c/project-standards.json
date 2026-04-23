@@ -1,0 +1,189 @@
+{
+  "reviewer": "project-standards",
+  "standards_files_found": [],
+  "standards_files_applicable": [],
+  "note": "No CLAUDE.md or AGENTS.md exists in this repository. No repo-level standards file governs this project. All findings below are therefore derived from the four audit tasks explicitly assigned (missing standards file assessment, naming conventions, cross-platform portability, and tool-selection policies) rather than from any written project rule. Confidence values reflect the strength of the observable evidence, not rule-citation certainty.",
+  "findings": [
+    {
+      "id": "PSR-001",
+      "category": "missing_standards_file",
+      "title": "No CLAUDE.md or AGENTS.md present for a multi-contributor-ready OSS project",
+      "severity": "low",
+      "confidence": 0.70,
+      "files_affected": [],
+      "description": "The repository has no CLAUDE.md or AGENTS.md. For a personal alpha-stage CLI this is not unusual, but the project already has: a goreleaser release pipeline, a homebrew formula stub, an npm wrapper, GitHub CI on two OS targets, and a roadmap with v2/v3 milestones. The combination of automation complexity and aspirations toward public adoption makes a CLAUDE.md genuinely useful now rather than a future concern.",
+      "recommended_content": [
+        "Build commands: `go build ./...`, `go test ./... -race -count=1`, `go vet ./...`",
+        "Key env vars: CCP_ROOT (test isolation), XDG_CONFIG_HOME, CCP_PROFILE",
+        "Windows explicitly unsupported until v2.1 (unix.Flock dependency in internal/fslock/fslock.go has no Windows analog)",
+        "gofmt is not enforced by CI — four files currently fail gofmt -l (paths.go, diff.go, rollback.go, sync.go); running gofmt before commits is expected",
+        "go-git/v5 is used for all git operations — do not add exec.Command('git', ...) calls",
+        "Test isolation: every test sets CCP_ROOT=t.TempDir() via t.Setenv; never rely on the real HOME",
+        "stat_test.go in internal/paths/ is a non-standard helper file; it is package-internal (not _test suffix) — the naming convention for test helpers in this repo is to keep them in the same package without the _test suffix",
+        "Shell snippet tests (shellinit_test.go) invoke /bin/sh at runtime; they are skipped automatically when sh is unavailable"
+      ],
+      "confidence_rationale": "A CLAUDE.md is beneficial but not mandatory for this project type. Confidence is moderate because this is a judgment call about when the project crosses the threshold of needing one."
+    },
+    {
+      "id": "PSR-002",
+      "category": "naming_convention",
+      "title": "stat_test.go uses a non-test filename for a test helper",
+      "severity": "low",
+      "confidence": 0.75,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/paths/stat_test.go"
+      ],
+      "description": "The file is named `stat_test.go` but is in package `paths` (not `paths_test`). In Go, the `_test.go` suffix causes the file to be compiled only during `go test`, but the filename suffix `_test` conventionally signals an external test package or a file that contains `Test*` functions. This file contains only a helper function `statDir`. The name implies test content when the file's actual role is to provide an internal helper compiled only under test. The conventional Go pattern for this is either: (a) keep it as `_test.go` with a clear name like `helpers_test.go`, or (b) name it without the `_test` suffix and use build tags if needed. As written it is technically correct but the naming is misleading — `statDir` is not itself a test but it lives in a file the toolchain treats as test-only code.",
+      "evidence_in_code": "Line 5 of stat_test.go: `func statDir(d string) (os.FileInfo, error) { return os.Stat(d) }` — a helper, not a Test* function, in a _test.go file.",
+      "confidence_rationale": "The Go spec is clear that _test.go files are test-only. The naming is non-idiomatic but not broken. Confidence is moderate because this is a style observation without an applicable project rule."
+    },
+    {
+      "id": "PSR-003",
+      "category": "cross_platform_portability",
+      "title": "unix.Flock dependency has no Windows build guard",
+      "severity": "medium",
+      "confidence": 0.88,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/fslock/fslock.go"
+      ],
+      "description": "internal/fslock/fslock.go imports `golang.org/x/sys/unix` and calls `unix.Flock`. The `unix` package does not build on Windows. The project's README and goreleaser config correctly exclude Windows from build targets (`goos: [darwin, linux]`), but the source file carries no `//go:build !windows` constraint. If a contributor attempts to run `go build ./...` on Windows or adds Windows to goreleaser, this file will produce a compile error with no guidance. The go.mod also includes `github.com/Microsoft/go-winio` as an indirect dependency (pulled in by go-git), which could give a false impression that Windows is partially supported. Adding a `//go:build !windows` tag to fslock.go would make the constraint explicit and produce a helpful build error instead of a linker failure.",
+      "evidence_in_code": "fslock.go line 10: `\"golang.org/x/sys/unix\"`, line 25: `unix.Flock(int(f.Fd()), unix.LOCK_EX)`, line 37: `unix.Flock(int(l.f.Fd()), unix.LOCK_UN)`. No //go:build tag present.",
+      "goreleaser_evidence": ".goreleaser.yaml line 16-18: `goos: [darwin, linux]` — Windows deliberately excluded at build level, but not at source level.",
+      "confidence_rationale": "The unix package is factually incompatible with Windows. The missing build tag is an objective gap. The README acknowledges Windows is unsupported until v2.1, which confirms intent but not enforcement at the source level."
+    },
+    {
+      "id": "PSR-004",
+      "category": "cross_platform_portability",
+      "title": "CI matrix omits Linux arm64 despite goreleaser releasing linux_arm64 binaries",
+      "severity": "low",
+      "confidence": 0.72,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/.github/workflows/ci.yml"
+      ],
+      "description": "ci.yml runs tests on `ubuntu-latest` (x86_64) and `macos-latest` (arm64 on GitHub's M-series runners). goreleaser produces four binaries: darwin_amd64, darwin_arm64, linux_amd64, linux_arm64. There is no linux_arm64 test runner in CI. While cross-compilation is tested implicitly, runtime behavior (especially the go-git SSH auth paths) is only verified on linux_amd64 and darwin_arm64. This is a common gap for small projects and unlikely to cause issues for the current featureset, but it is worth documenting.",
+      "confidence_rationale": "This is an observation about CI coverage, not a code defect. Confidence is moderate because Linux arm64 divergence is rare in practice for pure-Go code with no cgo."
+    },
+    {
+      "id": "PSR-005",
+      "category": "tool_selection",
+      "title": "Shell snippets emitted by ccp shell-init use awk to parse TOML, creating a fragile dependency",
+      "severity": "medium",
+      "confidence": 0.82,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/cli/shellinit.go"
+      ],
+      "description": "The POSIX and fish shell snippets written by `writeShellInit` use `awk -F' *= *' '/^active_profile/ ...'` to parse the manifest.toml at shell startup time. This awk invocation is fragile in several ways: (1) it will silently produce the wrong result if the active_profile value contains TOML escapes (e.g., a profile name with a backslash, which is legal in TOML strings); (2) it treats any line containing `active_profile` as a match, including commented lines; (3) it depends on awk being available in PATH at shell init time (true on macOS/Linux but not guaranteed in minimal containers). The safer alternative — already implemented in Go — is for `ccp prompt` or a dedicated `ccp shell-active` command to read the manifest via the Go TOML parser and print the result, so the shell snippet calls `$(ccp shell-active)` rather than parsing TOML inline. This is a design-level concern because the awk approach is intentional (keeps the snippet shell-self-contained), but the fragility is real.",
+      "evidence_in_code": "shellinit.go line 72: `profile=\"$(awk -F' *= *' '/^active_profile/ { gsub(/\"/, \"\", $2); print $2; exit }' \"$manifest\" 2>/dev/null)\"`. Line 96 (fish variant) has the same pattern.",
+      "confidence_rationale": "The fragility is real and observable, but the design choice (shell-self-contained snippet) is deliberate. The awk approach works for all valid profile names given the name regex `^[a-z][a-z0-9_-]{0,62}$` (no TOML special characters possible), which mitigates the first concern. Confidence is moderate-high because the awk dependency is a real portability/maintenance risk even if it doesn't fail for current inputs."
+    },
+    {
+      "id": "PSR-006",
+      "category": "tool_selection",
+      "title": "exec.Command usage in exec.go is correct and intentional — no finding",
+      "severity": "info",
+      "confidence": 1.0,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/cli/exec.go"
+      ],
+      "description": "internal/cli/exec.go uses os/exec to launch the user-specified child process. This is the correct approach — the purpose of `ccp exec` is to spawn an arbitrary external command with a modified environment. A pure-Go alternative does not exist for this use case. This is not a violation of tool-selection policy.",
+      "disposition": "no_finding"
+    },
+    {
+      "id": "PSR-007",
+      "category": "tool_selection",
+      "title": "All git operations use go-git/v5 — no exec.Command('git') shelling out",
+      "severity": "info",
+      "confidence": 1.0,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go",
+        "/Users/dalley/dev/Personal/ccp/internal/sync/auth.go",
+        "/Users/dalley/dev/Personal/ccp/internal/sync/test_helpers.go"
+      ],
+      "description": "All git operations (init, clone, add, commit, push, pull, status, reset, remote management) are performed through go-git/v5, which is already a direct dependency. No exec.Command('git') calls exist in non-test production code. sync_status.go does emit a user-facing hint string containing a `git -C ... status -sb` command (line 393 of sync.go), but this is advisory text printed to the user, not an exec.Command call. This is correct and consistent tool selection.",
+      "disposition": "no_finding"
+    },
+    {
+      "id": "PSR-008",
+      "category": "naming_convention",
+      "title": "Go package names are consistent with directory names throughout",
+      "severity": "info",
+      "confidence": 1.0,
+      "files_affected": [],
+      "description": "All packages follow the Go convention of matching the package name to the directory basename: internal/cli -> package cli, internal/backup -> package backup, internal/fslock -> package fslock, internal/manifest -> package manifest, internal/paths -> package paths, internal/profile -> package profile, internal/sync -> package sync. The sync package uses a local alias `ccpsync` in two CLI files (sync_setup.go, sync_status.go, sync_push.go, sync_pull.go) to avoid shadowing the stdlib `sync` package — this is correct practice. cmd/ccp/main.go uses package main.",
+      "disposition": "no_finding"
+    },
+    {
+      "id": "PSR-009",
+      "category": "naming_convention",
+      "title": "Test file naming follows _test.go convention consistently (except stat_test.go)",
+      "severity": "info",
+      "confidence": 1.0,
+      "files_affected": [],
+      "description": "All files containing Test* functions are correctly named with the _test.go suffix and use the same package (internal package tests, not _test external packages). test_helpers.go in internal/sync/ is the one non-_test.go helper file for test-only code; it is in package sync (non-exported) and contains no Test* functions. This is a valid Go pattern for sharing helpers between the package itself and its tests, though it means the helpers are compiled into the non-test binary (they are unexported, so this is a minor binary size concern, not a correctness issue).",
+      "disposition": "no_finding"
+    },
+    {
+      "id": "PSR-010",
+      "category": "code_formatting",
+      "title": "Four Go source files fail gofmt -l; CI does not enforce gofmt",
+      "severity": "low",
+      "confidence": 0.95,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/paths/paths.go",
+        "/Users/dalley/dev/Personal/ccp/internal/profile/diff.go",
+        "/Users/dalley/dev/Personal/ccp/internal/profile/rollback.go",
+        "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go"
+      ],
+      "description": "Running `gofmt -l` on the repository identifies four files with non-canonical formatting. The deviations are: (1) paths.go — Paths struct fields use extra manual alignment spaces rather than gofmt's standard tab alignment; (2) diff.go — DiffKind const block fields have extra alignment spaces; (3) rollback.go — inline struct definition `type move struct{ from, to, name string; isSource bool }` is not expanded to multi-line form; (4) sync.go — StatusSummary struct fields have extra alignment spaces. The CI workflow runs `go vet ./...` but not `gofmt -l ./...`, so these non-canonical formats are not caught automatically. This is a low-severity issue because gofmt violations don't affect correctness, but adding `gofmt -l ./... && [ -z \"$(gofmt -l .)\" ]` or using `golangci-lint` to the CI would prevent formatting drift.",
+      "evidence": "gofmt -l /Users/dalley/dev/Personal/ccp/internal/ output: paths/paths.go, profile/diff.go, profile/rollback.go, sync/sync.go",
+      "confidence_rationale": "gofmt output is deterministic and unambiguous. Confidence is very high."
+    },
+    {
+      "id": "PSR-011",
+      "category": "dead_code",
+      "title": "pathsHelper type alias in sync.go is unused",
+      "severity": "low",
+      "confidence": 0.90,
+      "files_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go"
+      ],
+      "description": "sync.go line 518 declares `type pathsHelper = paths.Paths` with a comment saying it is 'currently only used by tests'. Grepping the entire repository for `pathsHelper` shows zero usages — neither in sync.go itself nor in sync_test.go. The `go vet` step in CI does not flag unused type declarations. This is dead code that should be removed.",
+      "evidence_in_code": "sync.go lines 515-518: `// pathsHelper is a convenience alias ... Currently only used by tests. type pathsHelper = paths.Paths` — but no reference to pathsHelper exists anywhere in the package.",
+      "confidence_rationale": "Grep confirms zero usages of the identifier. High confidence."
+    }
+  ],
+  "residual_risks": [
+    {
+      "id": "RR-001",
+      "description": "The sync package's Pull function calls hardReset (go-git HardReset) after backupProfilesDir. If the backup succeeds but the hard reset fails midway, the user is left with neither the original tree nor a clean repo state. There is no recovery path documented in the error message.",
+      "severity": "low",
+      "confidence": 0.65
+    },
+    {
+      "id": "RR-002",
+      "description": "npm/install.js implements a minimal USTAR tar extractor by hand. The implementation handles the common goreleaser archive layout, but it does not handle PAX extended headers (used by GNU tar for long filenames). If goreleaser ever produces PAX headers (e.g., for deeply nested files), the extractor will silently fail to find the binary.",
+      "severity": "low",
+      "confidence": 0.60
+    }
+  ],
+  "testing_gaps": [
+    {
+      "id": "TG-001",
+      "description": "No tests exercise the fslock package on concurrent processes (only concurrent goroutines). The comment in fslock_test.go acknowledges that flock is per-process and a goroutine test is insufficient. A subprocess-based test would give higher confidence that the lock file correctly serializes concurrent ccp invocations.",
+      "files": ["/Users/dalley/dev/Personal/ccp/internal/fslock/fslock_test.go"],
+      "severity": "low"
+    },
+    {
+      "id": "TG-002",
+      "description": "The npm/install.js postinstall script has no automated tests. The USTAR parser, redirect follower, and chmod path are untested. Any regression would only surface when a user installs via npm.",
+      "files": ["/Users/dalley/dev/Personal/ccp/npm/install.js"],
+      "severity": "low"
+    },
+    {
+      "id": "TG-003",
+      "description": "The sync push/pull paths that exercise network I/O (sshAuthFromEnv, real remote push) are not covered by tests. The TestCrossMachineCloneRoundTrip test uses a local bare repo over the filesystem. SSH agent auth and key-based auth code paths in auth.go are unreachable in CI.",
+      "files": ["/Users/dalley/dev/Personal/ccp/internal/sync/auth.go"],
+      "severity": "low"
+    }
+  ]
+}

@@ -18,6 +18,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "Files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
       - run: go vet ./...
       - run: go test ./... -race -count=1
       - run: go build -o /tmp/ccp ./cmd/ccp

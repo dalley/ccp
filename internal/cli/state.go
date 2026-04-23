@@ -12,7 +12,6 @@ import (
 type state struct {
 	Paths    paths.Paths
 	Manifest manifest.Manifest
-	Existed  bool
 }
 
 func loadState() (state, error) {
@@ -23,11 +22,11 @@ func loadState() (state, error) {
 	if err := p.Ensure(); err != nil {
 		return state{}, err
 	}
-	m, existed, err := manifest.Load(p.ManifestPath)
+	m, _, err := manifest.Load(p.ManifestPath)
 	if err != nil {
 		return state{}, err
 	}
-	return state{Paths: p, Manifest: m, Existed: existed}, nil
+	return state{Paths: p, Manifest: m}, nil
 }
 
 // withLock acquires the global ccp state lock, runs fn, and releases.

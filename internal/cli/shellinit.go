@@ -61,6 +61,11 @@ func writeShellInit(w io.Writer, shell string, p paths.Paths) error {
 // CLAUDE_CONFIG_DIR is already set in the environment (escape hatch) or
 // CCP_PROFILE is set (per-shell override). The snippet uses $HOME so it is
 // portable across machines with different usernames.
+//
+// The profile value is re-validated against ccp's name regex before being
+// interpolated into CLAUDE_CONFIG_DIR. Without this check, a tampered manifest
+// with an active_profile containing backticks or $() would execute arbitrary
+// shell code when the user's shell sourced the shellrc.
 func writePosix(w io.Writer, _ paths.Paths) {
 	fmt.Fprint(w, `__ccp_activate() {
   [ -n "$CLAUDE_CONFIG_DIR" ] && return 0
@@ -71,9 +76,10 @@ func writePosix(w io.Writer, _ paths.Paths) {
   elif [ -r "$manifest" ]; then
     profile="$(awk -F' *= *' '/^active_profile/ { gsub(/"/, "", $2); print $2; exit }' "$manifest" 2>/dev/null)"
   fi
-  if [ -n "$profile" ]; then
-    export CLAUDE_CONFIG_DIR="$HOME/.claude-$profile"
-  fi
+  case "$profile" in
+    ''|*[!a-z0-9_-]*|[!a-z]*) return 0 ;;
+  esac
+  export CLAUDE_CONFIG_DIR="$HOME/.claude-$profile"
 }
 __ccp_activate
 `)
@@ -95,9 +101,13 @@ func writeFish(w io.Writer, _ paths.Paths) {
   else if test -r $manifest
     set profile (awk -F' *= *' '/^active_profile/ { gsub(/"/, "", $2); print $2; exit }' $manifest 2>/dev/null)
   end
-  if test -n "$profile"
-    set -gx CLAUDE_CONFIG_DIR "$HOME/.claude-$profile"
+  # Re-validate the name before interpolating. Rejects anything that would
+  # let a tampered manifest smuggle shell metacharacters through to the
+  # export.
+  if not string match -rq '^[a-z][a-z0-9_-]*$' -- "$profile"
+    return 0
   end
+  set -gx CLAUDE_CONFIG_DIR "$HOME/.claude-$profile"
 end
 __ccp_activate
 `)

@@ -33,7 +33,10 @@ func Rollback(p paths.Paths, backupDir string) ([]string, error) {
 
 	// Plan the moves first so we can surface conflicts before touching the
 	// filesystem. Each entry maps to a final destination.
-	type move struct{ from, to, name string; isSource bool }
+	type move struct {
+		from, to, name string
+		isSource       bool
+	}
 	var moves []move
 	var restored []string
 	seen := map[string]struct{}{}

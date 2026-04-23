@@ -26,7 +26,10 @@ func newProfileShowCmd() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("no profile specified and no active profile set")
 			}
-			pr := profile.New(s.Paths, name)
+			pr, err := profile.NewChecked(s.Paths, name)
+			if err != nil {
+				return err
+			}
 			if !pr.Exists() {
 				return fmt.Errorf("profile %q not found", name)
 			}

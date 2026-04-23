@@ -3,12 +3,14 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/dalley/ccp/internal/backup"
 	"github.com/dalley/ccp/internal/profile"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func newProfileDeleteCmd() *cobra.Command {
@@ -23,11 +25,22 @@ func newProfileDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pr := profile.New(s.Paths, name)
+			pr, err := profile.NewChecked(s.Paths, name)
+			if err != nil {
+				return err
+			}
 			if !pr.Exists() {
 				return fmt.Errorf("profile %q not found", name)
 			}
 			if !yes {
+				// Refuse to prompt when stdin isn't a TTY — an agent piping
+				// us /dev/null would otherwise see the prompt read EOF,
+				// silently return false, exit 0 with "Cancelled.", and have
+				// no way to tell what happened. Force the caller to pass
+				// --yes instead.
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					return fmt.Errorf("refusing to prompt for confirmation on a non-interactive stdin; re-run with --yes to confirm deletion")
+				}
 				if !confirm(cmd, fmt.Sprintf("Delete profile %q? This moves its files to a backup.", name)) {
 					fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
 					return nil

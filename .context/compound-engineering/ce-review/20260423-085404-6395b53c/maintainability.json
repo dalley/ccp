@@ -1,0 +1,133 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "id": "M-01",
+      "title": "pathsHelper type alias is dead code",
+      "severity": "high",
+      "confidence": 0.97,
+      "category": "dead_code",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go",
+      "line": 518,
+      "description": "The type alias `type pathsHelper = paths.Paths` at the bottom of sync.go is never referenced anywhere — not in sync.go itself, not in sync_test.go (which imports paths directly as `paths.Paths`), not in any other file. The comment claims it is 'Currently only used by tests' but that is factually wrong: sync_test.go uses `paths.Paths` directly at line 8 and calls `paths.Resolve()` at line 17. The alias was apparently declared in anticipation of a use that was never written. It adds a false documentation claim alongside genuinely dead code.",
+      "recommendation": "Delete the type alias and its comment entirely. If a test-helper type ever needs to be pinned to paths.Paths, add it at that point with an accurate comment."
+    },
+    {
+      "id": "M-02",
+      "title": "copyReader in io.go is a single-use wrapper that adds indirection without value",
+      "severity": "medium",
+      "confidence": 0.88,
+      "category": "unnecessary_indirection",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/profile/io.go",
+      "line": 7,
+      "description": "io.go is a 9-line file containing a single package-private function `copyReader` that unconditionally delegates to `io.Copy`. It has one call site: `copyFile` in profile.go at line 116. The comment says it exists 'so tests can swap the implementation if needed' — but no test swaps it, there is no mechanism to swap it (it is not a variable, interface, or exported symbol), and the Go test pattern for intercepting io.Copy is to pass an `io.Writer` — which `copyFile` already accepts. The abstraction provides zero testability benefit today and the dedicated file creates a false impression that swapping the implementation is a meaningful design intent.",
+      "recommendation": "Delete io.go and replace `copyReader(out, in)` with `io.Copy(out, in)` directly in copyFile. If a future need arises to intercept copying, make copyFile accept a writer (already the case) or promote the function to a variable at that point."
+    },
+    {
+      "id": "M-03",
+      "title": "PushOptions.DryRun is accepted but silently ignored inside Push",
+      "severity": "medium",
+      "confidence": 0.95,
+      "category": "dead_code",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go",
+      "line": 236,
+      "description": "PushOptions is a struct with a single field `DryRun bool`. The CLI (sync_push.go line 50) passes `DryRun: dryRun` into Push. Inside Push the opts parameter is never inspected — opts.DryRun is read by neither the repo.Push call nor any conditional. The dry-run gating in the CLI (sync_push.go lines 33–44) short-circuits before calling Push at all, so Push itself never sees a true DryRun. The struct and field create a false contract: a caller who reads the signature expects Push to honour DryRun; it does not.",
+      "recommendation": "Either (a) remove PushOptions entirely and make Push's signature `Push(configDir string) error`, or (b) implement the opts.DryRun check inside Push by returning early before repo.Push. Option (a) is simpler until a second option is needed."
+    },
+    {
+      "id": "M-04",
+      "title": "state.Existed is populated but never read by any command",
+      "severity": "medium",
+      "confidence": 0.92,
+      "category": "dead_code",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/cli/state.go",
+      "line": 15,
+      "description": "The `state` struct has an `Existed bool` field set in loadState() (line 30) to capture whether the manifest file pre-existed. A grep of the entire repository finds zero reads of `.Existed` outside state.go itself. The only command that needs this information — `ccp init` — does not call loadState() at all; it loads the manifest directly via `manifest.Load` and uses the returned `existed` bool locally. The field is dead cargo in a struct passed to every command.",
+      "recommendation": "Remove the Existed field from the state struct. If init ever needs to route through loadState, thread the existed value through at that point."
+    },
+    {
+      "id": "M-05",
+      "title": "Three near-identical test setup helpers across packages with similar but not identical semantics",
+      "severity": "low",
+      "confidence": 0.72,
+      "category": "naming_obscures_intent",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/profile/manager_test.go",
+      "line": 12,
+      "description": "There are three test environment setup helpers with different names and different return types: (1) `setupHome(t) paths.Paths` in internal/profile/manager_test.go — returns the Paths struct; (2) `setupCLI(t) string` in internal/cli/profile_cmd_test.go — returns the root directory string; (3) `newHome(t) (paths.Paths, func())` in internal/sync/sync_test.go — returns Paths plus a no-op cleanup func. All three perform the same core operation (set CCP_ROOT + XDG_CONFIG_HOME, call Resolve + Ensure). A contributor jumping between packages must mentally track that these are equivalent bootstraps with different wrapping. The no-op cleanup func in newHome is particular noise: t.TempDir() already registers cleanup via t.Cleanup, so the returned func() {} serves no purpose and its presence implies it matters.",
+      "recommendation": "The no-op cleanup func in newHome should be removed from the return signature — callers that ignore it (all of them call `p, _ := newHome(t)`) are silently discarding it, which is a linting red flag. The naming divergence (setupHome vs setupCLI vs newHome) is a minor cost to pay for package isolation, but the return-type inconsistency between (1) and (2) is a real readability gap: make setupCLI return paths.Paths like setupHome does, or document the difference explicitly."
+    },
+    {
+      "id": "M-06",
+      "title": "profile.go vs manager.go split is not clearly motivated and the boundary shifts mid-operation",
+      "severity": "low",
+      "confidence": 0.65,
+      "category": "premature_abstraction",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/profile/manager.go",
+      "line": 1,
+      "description": "profile.go contains: ValidateName, Profile type, New, Exists, List, copyTree, copyFile. manager.go contains: Create, Delete, Rename, seedFromCurrent. The split is named as if profile.go is the data type and manager.go is the operations layer, but: (a) List is a top-level operation yet lives in profile.go; (b) copyTree and copyFile are pure utilities used only by manager.go operations but live in profile.go. A new contributor reading profile.go must scroll past private copy helpers to understand the type, and reading manager.go must mentally link it back to copyTree in profile.go. The split adds a file boundary without a clean conceptual boundary.",
+      "recommendation": "Move copyTree and copyFile to manager.go where they are used, and move List to manager.go to consolidate all operations there. profile.go would then contain only the type declaration, ValidateName, New, and Exists — a clear data-type file."
+    },
+    {
+      "id": "M-07",
+      "title": "contains() in sync/test_helpers.go is a one-line wrapper that creates accidental complexity",
+      "severity": "low",
+      "confidence": 0.80,
+      "category": "unnecessary_indirection",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/test_helpers.go",
+      "line": 10,
+      "description": "test_helpers.go exports a `contains(s, sub string) bool` function solely to avoid importing strings in sync_test.go. The function is called twice (lines 55 and 188 of sync_test.go). The file's comment is explicit: 'so sync_test.go doesn't need to import strings'. Saving one import at the cost of an extra file and an indirection layer is a net negative: a reader of sync_test.go now has to find contains, and test_helpers.go mixes this trivial helper with the genuinely useful `initBare` function. The avoidance of a standard-library import is not a real benefit.",
+      "recommendation": "Delete contains() from test_helpers.go and use strings.Contains directly in sync_test.go. Keep initBare — that is a legitimately non-trivial helper that belongs isolated from production code."
+    },
+    {
+      "id": "M-08",
+      "title": "copyDir in sync/copy.go and copyTree in profile/profile.go are near-identical implementations",
+      "severity": "low",
+      "confidence": 0.70,
+      "category": "unnecessary_indirection",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/copy.go",
+      "line": 11,
+      "description": "sync/copy.go:copyDir and profile/profile.go:copyTree perform the same recursive copy: walk src, handle symlinks, dirs, and regular files, preserve modes. The implementations are structurally identical. The duplication exists because sync is an internal package that cannot import profile (and vice versa — they have no dependency relationship). However, a third option — a shared internal/fsutil or internal/fscopy package — would eliminate the duplication. Today the only cost is two places to fix if a copy bug appears, but the near-duplication is a maintenance trap for anyone who adds a feature to one (e.g., handling hard links) and forgets the other.",
+      "recommendation": "Consider extracting a minimal internal/fscopy package with a single copyTree function. At two copies this is a judgment call, not a crisis — flag it for the next person who needs to modify either implementation."
+    },
+    {
+      "id": "M-09",
+      "title": "Error message tone is inconsistent: some messages are lowercase, others are sentence-case with punctuation",
+      "severity": "low",
+      "confidence": 0.75,
+      "category": "naming_obscures_intent",
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go",
+      "line": 289,
+      "description": "Go convention is that error strings are lowercase and without terminal punctuation (errcheck, staticcheck, and the Go style guide all state this). The codebase is inconsistent. Examples of conforming strings: `'working tree has uncommitted changes; commit them...'` (sync.go:289). Examples of non-conforming: `'Sync not set up — run ccp sync setup --url <git> first'` (sync_push.go:21, uppercase S), `'No second profile given and no active profile set'` (profile_diff.go:28, uppercase N), `'No profile specified and no active profile set'` (profile_show.go:23, uppercase N), `'No command given after profile name'` (exec.go:39, uppercase N). These errors surface in cobra's error output and in test assertions, so tone affects both user experience and test readability.",
+      "recommendation": "Lowercase all error strings and strip terminal punctuation per Go idiom. This is mechanical and low-risk; a single pass with grep for `fmt.Errorf(\"[A-Z]` will find all violators."
+    }
+  ],
+  "residual_risks": [
+    {
+      "id": "RR-01",
+      "description": "sync.go:Status deliberately skips computing ahead/behind to avoid a network fetch, leaving AheadBehind as a hardcoded instruction string rather than real data. The StatusSummary.AheadBehind field therefore always holds the same instruction text regardless of actual ahead/behind state. If a consumer (UI, script) tries to parse AheadBehind as a count or boolean, it will silently misbehave. The field's type (string) and the hardcoded value make this safe for now but fragile as the feature grows.",
+      "severity": "low"
+    },
+    {
+      "id": "RR-02",
+      "description": "profile_rename.go lines 27-33 iterates standard shellrc locations to uninstall the old alias but does NOT reinstall the alias under the new name, even when one existed. The comment acknowledges this ('we don't bother'). A user who had `alias claude-work=...` and runs `ccp profile rename work job` loses the alias silently — no warning, no suggestion. This is not a correctness bug (rename docs say aliases are not updated) but the silent omission will surprise users who expect symmetry with create --alias.",
+      "severity": "medium"
+    },
+    {
+      "id": "RR-03",
+      "description": "The `writePosix` and `writeFish` functions in shellinit.go both take a `paths.Paths` argument they never use (the parameter is named `_`). This is intentional today because the snippet uses $HOME rather than the resolved path for portability, but the signature creates a false expectation that Paths is available for future use. Any developer who adds path-sensitive content to the snippet will naturally use the parameter — which would break portability across machines if the absolute path leaks into the snippet.",
+      "severity": "low"
+    }
+  ],
+  "testing_gaps": [
+    {
+      "id": "TG-01",
+      "description": "sync/test_helpers.go:initBare is only callable from within the sync package (package-private). The cross-machine clone test in sync_test.go is the only consumer. If a future cli-layer test wants to verify `ccp sync pull` end-to-end against a real bare repo, it cannot reuse initBare and must re-implement it. Exporting it (InitBare) or moving it to a testutil package would enable CLI-layer tests of push/pull without duplicating the setup.",
+      "severity": "low"
+    },
+    {
+      "id": "TG-02",
+      "description": "PushOptions.DryRun is never tested — because Push silently ignores it, there is no test that asserts 'dry-run Push does not push'. The CLI-side dry-run guard is tested indirectly only by the fact that `--dry-run` causes the CLI to return before calling Push, which is not surfaced in any test assertion. If Push is later refactored to absorb the dry-run check, the existing tests will not catch a regression.",
+      "severity": "medium"
+    }
+  ]
+}

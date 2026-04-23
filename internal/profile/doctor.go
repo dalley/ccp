@@ -32,7 +32,10 @@ type DoctorFinding struct {
 func Doctor(p paths.Paths, profileName string) ([]DoctorFinding, error) {
 	var profiles []Profile
 	if profileName != "" {
-		pr := New(p, profileName)
+		pr, err := NewChecked(p, profileName)
+		if err != nil {
+			return nil, err
+		}
 		if !pr.Exists() {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, profileName)
 		}
@@ -61,7 +64,7 @@ func checkRuntime(pr Profile) []DoctorFinding {
 			out = append(out, DoctorFinding{
 				Profile: pr.Name, Severity: "warn",
 				Message: "runtime dir does not exist yet",
-				Hint:    "run `ccp use " + pr.Name + "` then launch Claude once to populate it",
+				Hint:    "run `ccp profile refresh " + pr.Name + "` to rebuild runtime symlinks",
 			})
 			return out
 		}

@@ -1,0 +1,152 @@
+{
+  "reviewer": "security",
+  "findings": [
+    {
+      "id": "SEC-001",
+      "priority": "P1",
+      "title": "Symlinks from git remote reproduced verbatim without target validation (symlink exfiltration)",
+      "confidence": 0.85,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go",
+      "lines": "479-485",
+      "also_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/profile/profile.go:88-94",
+        "/Users/dalley/dev/Personal/ccp/internal/sync/copy.go:22-28"
+      ],
+      "why_it_matters": "When a user runs `ccp sync setup --url <attacker-repo>` or `ccp sync pull` against a malicious remote, go-git materializes any symlink objects in the git tree as OS-level symlinks. mergeCopyDir in sync.go reproduces them verbatim with no check on whether the symlink target is inside the profile directory. The resulting chain is: ~/.claude-<name>/settings.json -> ~/.config/ccp/profiles/<name>/settings.json -> /etc/passwd (if the remote planted that symlink). Claude Code then opens /etc/passwd as the user's settings file. For hook scripts (hooks/ is a SharedItem), if the remote provides profiles/<name>/hooks/ as a symlink pointing to a directory containing executable scripts, Claude Code can enumerate and execute those scripts from arbitrary filesystem locations. Symlinks in hooks/, commands/, agents/, skills/ are the highest-risk paths because Claude Code executes their contents.",
+      "evidence": "sync.go line 479-485:\n  case info.Mode()&os.ModeSymlink != 0:\n    link, err := os.Readlink(path)\n    _ = os.Remove(target)\n    return os.Symlink(link, target)\nNo check that `link` resolves within the profile source tree. Same pattern in profile.go:88-94 (copyTree) and copy.go:22-28 (copyDir). After BuildSymlinks (symlinks.go:17-35), the chain extends into ~/.claude-<name>/ which is what Claude Code reads at startup.",
+      "remediation": "In mergeCopyDir, copyTree, and copyDir: after os.Readlink, resolve the symlink target to an absolute path and verify it is within the profile source directory using filepath.Rel. If the resolved target escapes the source root (starts with ..), skip or error. This is the same check already implemented in RefreshSymlinks (symlinks.go:63-64) for OUTBOUND cleanup -- apply the same logic to INBOUND copy."
+    },
+    {
+      "id": "SEC-002",
+      "priority": "P1",
+      "title": "Hook/skill scripts from untrusted git remote executed by Claude Code with no user warning after sync pull",
+      "confidence": 0.80,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/profile/shared.go",
+      "lines": "29-33",
+      "also_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/sync/sync.go:436-460",
+        "/Users/dalley/dev/Personal/ccp/internal/cli/sync_pull.go:40-54"
+      ],
+      "why_it_matters": "SharedItems includes hooks/, commands/, agents/, and skills/ -- directories Claude Code treats as executable artifacts (hook scripts, MCP command scripts, agent definitions). When `ccp sync pull` fetches from a remote, mergeCopyDir writes these files into the profile source tree without any content inspection. On the next `ccp profile refresh` or `ccp use`, BuildSymlinks links ~/.claude-<name>/hooks -> the profile source hooks dir. At the next Claude Code invocation, Claude executes any hook scripts found there. A user who has set up sync against a community/shared git repo, or whose remote is compromised, receives code execution at Claude's next startup. The pull success message says only 'Run `ccp profile refresh` to update symlinks' -- no warning that executable content was received.",
+      "evidence": "shared.go lists {Name:'hooks', Dir:true}, {Name:'commands', Dir:true}, {Name:'agents', Dir:true}, {Name:'skills', Dir:true} as SharedItems. sync.go CloneOrOpen (lines 436-460) calls mergeCopyDir for every directory in the cloned tree including profiles/<name>/hooks/. sync_pull.go line 50 emits no warning about executable content arrival.",
+      "remediation": "After sync pull completes and before symlinks are refreshed, display the list of executable files (hooks/, commands/) received from the remote and require explicit confirmation before linking them. Consider maintaining a content hash of previously-seen hook scripts and flagging new or changed ones. At minimum, the post-pull message should warn the user that hook scripts were received."
+    },
+    {
+      "id": "SEC-003",
+      "priority": "P1",
+      "title": "npm/install.js downloads binary without integrity verification (supply chain)",
+      "confidence": 0.90,
+      "file": "/Users/dalley/dev/Personal/ccp/npm/install.js",
+      "lines": "42-80",
+      "why_it_matters": "The postinstall script downloads a platform binary from GitHub Releases over HTTPS and executes it (line 73: execFileSync(binPath, ['version'])). There is no checksum or signature verification. An attacker who compromises the GitHub release (uploaded artifact replacement), the CDN serving the release, or who can perform a TLS MITM (via compromised CA or BGP hijack) can deliver an arbitrary binary that is installed and immediately executed as the installing user. The binary then manages SSH keys and shell configs -- giving it broad persistence capability.",
+      "evidence": "install.js lines 42-80: follow() fetches URL, Buffer.concat(chunks) assembles response, extractBinary() writes to binPath, fs.chmodSync(binPath, 0o755), execFileSync(binPath, ['version']). No call to a hash comparison function anywhere in the file. grep for 'sha|hash|verify|checksum|integrity|signature' returns no results.",
+      "remediation": "Publish SHA-256 checksums alongside each release (e.g., in a checksums.txt file also hosted in the release). In install.js, after download and before extraction, fetch the checksums file, parse the expected hash for this platform's tarball, and compare against crypto.createHash('sha256').update(gz).digest('hex'). Alternatively, publish a cosign signature and verify with cosign verify-blob. npm's own integrity field (sha512) for the tarball could also be leveraged if the tarball is pinned in package.json."
+    },
+    {
+      "id": "SEC-004",
+      "priority": "P1",
+      "title": "Missing ValidateName on profile names in exec, use, delete, show, refresh, diff -- path traversal into arbitrary directories",
+      "confidence": 0.82,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/cli/exec.go",
+      "lines": "31-55",
+      "also_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_use.go:17-37",
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_delete.go:21-68",
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_show.go:17-32",
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_refresh.go:19-29",
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_diff.go:24-31"
+      ],
+      "why_it_matters": "profile.Create and profile.Rename both call ValidateName before touching the filesystem. However, profile.New is called directly without ValidateName in exec, use, delete, show, refresh, and diff. The profile name feeds directly into filepath.Join for both SourceDir (profiles/<name>) and ConfigDir (~/.claude-<name>). With a name like '../../../../../../../../etc', SourceDir resolves to /etc (a real directory), so pr.Exists() returns true and the command proceeds. In exec.go specifically, CLAUDE_CONFIG_DIR is set to the resolved path and passed to the child process. In profile_delete.go, the Rename target (srcBackup) also uses the raw name -- with a traversal name pointing to a user-owned directory like Downloads, `ccp profile delete --yes '../../Downloads'` moves ~/Downloads into backups/. The immediate practical impact is self-harm (user-controlled) but in a scripting context with untrusted name input this becomes arbitrary directory displacement.",
+      "evidence": "exec.go line 44: `pr := profile.New(s.Paths, name)` where name=args[0] with no prior ValidateName call. profile_delete.go line 26: same pattern. manager.go line 31 shows that Create DOES call ValidateName -- the protection is inconsistently applied. With name='../../../../../../../../etc': ProfileSourceDir resolves to /etc via filepath.Join normalization (5 levels from profiles/ base), Exists() returns true, and the command proceeds.",
+      "remediation": "Add ValidateName(name) at the top of each command's RunE that accepts a profile name from user input -- before calling profile.New. This is already done in Create and Rename. The check is one line and has clear precedent in the codebase."
+    },
+    {
+      "id": "SEC-005",
+      "priority": "P2",
+      "title": "npm/install.js redirect follower accepts HTTP downgrade from HTTPS initial request",
+      "confidence": 0.75,
+      "file": "/Users/dalley/dev/Personal/ccp/npm/install.js",
+      "lines": "46-57",
+      "why_it_matters": "The follow() function fetches the initial URL over HTTPS but blindly follows redirect Location headers regardless of scheme. If a network intermediary or DNS poisoning causes the GitHub release URL to redirect to an http:// endpoint, the rest of the download proceeds unencrypted and is trivially MITM-able. This is exploitable on hotel/public Wi-Fi networks with captive portals or by ISPs doing transparent proxying. The attacker delivers a replacement binary that is then executed.",
+      "evidence": "install.js line 50: `return follow(res.headers.location, depth - 1, done)` -- location is used directly with no scheme validation. The new URL is passed to https.get(), but if location = 'http://attacker/evil.tar.gz', Node's https.get() will reject it with a protocol error... actually https.get with an http URL would throw. So the actual downgrade requires location to be an HTTP URL where the response is then fetched -- Node's https.get would error on http:// URLs. This reduces confidence slightly. The real risk is a redirect to a different HTTPS host the attacker controls.",
+      "evidence_updated": "The redirect to http:// may not execute cleanly with Node's https.get, but a redirect to an attacker-controlled HTTPS host (with valid cert for that host) is a valid vector. Confidence adjusted to 0.75.",
+      "remediation": "After receiving a redirect Location header, validate that new_url.startsWith('https://') before following. Alternatively, require that the redirect stays on the same host (github.com / objects.githubusercontent.com)."
+    },
+    {
+      "id": "SEC-006",
+      "priority": "P2",
+      "title": "SSH private key read with empty passphrase -- silently fails for encrypted keys, no user feedback",
+      "confidence": 0.70,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/sync/auth.go",
+      "lines": "28-37",
+      "why_it_matters": "sshAuthFromEnv falls back to reading ~/.ssh/id_ed25519 or ~/.ssh/id_rsa with an empty passphrase ('') when SSH_AUTH_SOCK is not set. If the key is encrypted (passphrase-protected), NewPublicKeysFromFile silently returns an error and falls through to the next key or returns nil. The sync operation then proceeds with no auth method -- for a public repo this works but for a private repo the push/pull silently fails with an authentication error. The user has no indication that their encrypted key was silently rejected. Beyond UX, the code reads the raw private key file from disk -- if the tool is run in an environment where the key should never be read directly (e.g., hardware token via ssh-agent only), the fallback bypasses that security posture.",
+      "evidence": "auth.go line 33: `gitssh.NewPublicKeysFromFile('git', key, '')` -- empty string passphrase. Line 34: `if err == nil { return auth }` -- error on encrypted key is silently swallowed.",
+      "remediation": "When NewPublicKeysFromFile fails with a passphrase error, log a warning to stderr: 'key ~/.ssh/id_ed25519 appears to be encrypted; set SSH_AUTH_SOCK to use ssh-agent'. This is a UX fix with a security hygiene benefit (users know their key was not loaded). Do not prompt for passphrase interactively -- that belongs to ssh-agent."
+    },
+    {
+      "id": "SEC-007",
+      "priority": "P2",
+      "title": "profile_delete.go: raw profile name (unvalidated) used in backup srcBackup path join",
+      "confidence": 0.72,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/profile/manager.go",
+      "lines": "125-128",
+      "also_affected": [
+        "/Users/dalley/dev/Personal/ccp/internal/cli/profile_delete.go:26"
+      ],
+      "why_it_matters": "manager.Delete() computes srcBackup = filepath.Join(backupDir, 'profiles-'+name) where name is the raw profile name passed from CLI. With path traversal in name (e.g., '../../Downloads'), srcBackup resolves to a path outside backupDir (e.g., ~/.config/ccp/backups/Downloads). Then os.Rename(pr.SourceDir, srcBackup) moves an arbitrary user-owned directory to that computed destination. The confirmation prompt shows the raw name so an interactive user would see something suspicious, but the --yes flag bypasses confirmation entirely. In a script that passes untrusted names to `ccp profile delete --yes`, this becomes an arbitrary user-directory-displacement gadget.",
+      "evidence": "manager.go line 125-128:\n  srcBackup := filepath.Join(backupDir, 'profiles-'+name)\n  if err := os.Rename(pr.SourceDir, srcBackup); err != nil {...}\nWith name='../../Downloads' and backupDir='/home/user/.config/ccp/backups/2024_pre-delete-downloads': srcBackup resolves to /home/user/.config/ccp/backups/Downloads (confirmed via filepath normalization).",
+      "remediation": "This is subsumed by adding ValidateName at the CLI layer (SEC-004). If the name is validated before reaching Delete(), the traversal cannot happen. As defense-in-depth, manager.Delete() could also assert that filepath.Rel(backupDir, srcBackup) does not start with '..'."
+    },
+    {
+      "id": "SEC-008",
+      "priority": "P3",
+      "title": "Lock file created with mode 0644 (world-readable)",
+      "confidence": 0.65,
+      "file": "/Users/dalley/dev/Personal/ccp/internal/fslock/fslock.go",
+      "lines": "21",
+      "why_it_matters": "The lock file at ~/.config/ccp/lock is created with mode 0644 (world-readable, group-readable). The file contains no secret data -- it is just a semaphore for flock(2). However, world-readability is unnecessary and reveals that ccp is in use and that the lock file exists. On multi-user systems (servers, shared hosts), other users can observe lock contention timing. Mode 0600 is more appropriate for a user-specific state file.",
+      "evidence": "fslock.go line 21: `os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)`",
+      "remediation": "Change 0o644 to 0o600. The file never needs to be read by other users or processes."
+    }
+  ],
+  "residual_risks": [
+    {
+      "area": "Git hard reset on force pull",
+      "description": "hardReset() in sync.go resets to the LOCAL HEAD (not the remote HEAD). An attacker who can push to the configured remote cannot directly trigger deletion of local state via hardReset alone -- the reset is to the local commit, and then Pull merges the remote. However, if the user's local branch is tracking a remote branch that an attacker controls, pull --force followed by `ccp sync pull --force` gives the attacker the ability to overwrite profile content (including hooks) on the next pull. This is the expected git-sync threat model: trust in the remote is required.",
+      "accepted_or_residual": "residual -- documented trust requirement for git remote"
+    },
+    {
+      "area": "SyncMarker validation is display-only",
+      "description": "ReadMarker reads .ccp-sync.json and sync_setup prints managedBy/version, but does NOT block setup if managedBy != 'ccp'. A user can bond with an arbitrary git repo. The consequence is unexpected profile content, not code execution (beyond the hook execution risk already identified in SEC-002).",
+      "accepted_or_residual": "residual -- considered acceptable UX tradeoff, hook risk covered by SEC-002"
+    },
+    {
+      "area": "CCP_ROOT env var expands ccp trust boundary",
+      "description": "CCP_ROOT overrides home for all path resolution. A process that can inject CCP_ROOT=/attacker-controlled-path before ccp runs can redirect all ccp operations to that tree. This is a standard env-var trust boundary issue for CLI tools and requires local code execution to exploit -- which already gives the attacker equivalent capability.",
+      "accepted_or_residual": "accepted -- env vars are a user-controlled trust boundary"
+    },
+    {
+      "area": "filepath.Walk in copyTree/mergeCopyDir does not follow symlinks to directories",
+      "description": "Go's filepath.Walk calls Lstat, so a symlink to a directory is visited as a symlink (ModeSymlink), not descended into. This PREVENTS infinite loops and unintended content inclusion from symlinked directories. However it means the symlink is reproduced verbatim (the SEC-001 finding). The non-following behavior is protective against directory traversal during walk, but the verbatim reproduction is the remaining risk.",
+      "accepted_or_residual": "residual -- partially protective, SEC-001 covers the gap"
+    }
+  ],
+  "testing_gaps": [
+    {
+      "area": "Symlink target validation",
+      "description": "No test exercises copyTree, mergeCopyDir, or copyDir with a symlink whose target is outside the source tree. A test should create a fixture with an absolute-path symlink (e.g., /etc/passwd) and assert that the copy functions either skip it or return an error."
+    },
+    {
+      "area": "Profile name input validation at CLI layer",
+      "description": "No test for `ccp exec`, `ccp use`, `ccp profile delete` etc. with a path-traversal profile name (e.g., '../../../etc'). Tests should assert these commands return an error from ValidateName rather than proceeding."
+    },
+    {
+      "area": "npm install.js binary integrity",
+      "description": "No test verifies that a tampered tarball (wrong binary content) is rejected. A test could serve a local HTTP server with a modified tarball and verify install.js errors rather than installs."
+    },
+    {
+      "area": "Hook script delivery via git sync",
+      "description": "No integration test simulates a git remote delivering a hook script and verifies either (a) a warning is shown, or (b) user confirmation is required before BuildSymlinks links the hooks directory."
+    }
+  ]
+}

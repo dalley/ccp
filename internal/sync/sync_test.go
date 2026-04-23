@@ -3,6 +3,7 @@ package sync
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dalley/ccp/internal/paths"
@@ -52,7 +53,7 @@ func TestInitRepoMakesInitialCommit(t *testing.T) {
 	// a full test, just verify the ignore file lists it.
 	b, _ := os.ReadFile(filepath.Join(p.ConfigDir, ".gitignore"))
 	for _, want := range []string{"manifest.toml", "backups/", "lock", "secrets/"} {
-		if !contains(string(b), want) {
+		if !strings.Contains(string(b), want) {
 			t.Errorf(".gitignore missing %q", want)
 		}
 	}
@@ -142,7 +143,7 @@ func TestCrossMachineCloneRoundTrip(t *testing.T) {
 	if _, err := StageAndCommit(pa.ConfigDir); err != nil {
 		t.Fatalf("A stage+commit: %v", err)
 	}
-	if err := Push(pa.ConfigDir, PushOptions{}); err != nil {
+	if err := Push(pa.ConfigDir); err != nil {
 		t.Fatalf("A push: %v", err)
 	}
 
@@ -185,7 +186,7 @@ func TestPullRefusesDirtyWorkingTreeWithoutForce(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on dirty tree without --force")
 	}
-	if !contains(err.Error(), "uncommitted") {
+	if !strings.Contains(err.Error(), "uncommitted") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

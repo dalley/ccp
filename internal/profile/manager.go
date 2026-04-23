@@ -112,6 +112,9 @@ func seedFromCurrent(p paths.Paths, pr Profile) error {
 //
 // Returns the backup path so the caller can surface it.
 func Delete(p paths.Paths, name string, backupDir string) (string, error) {
+	if err := ValidateName(name); err != nil {
+		return "", err
+	}
 	pr := New(p, name)
 	if !pr.Exists() {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, name)
@@ -142,8 +145,11 @@ func Delete(p paths.Paths, name string, backupDir string) (string, error) {
 // Rename moves a profile's source and runtime dirs to a new name. It does
 // NOT touch alias blocks — callers update those in the CLI layer.
 func Rename(p paths.Paths, oldName, newName string) error {
+	if err := ValidateName(oldName); err != nil {
+		return fmt.Errorf("old name: %w", err)
+	}
 	if err := ValidateName(newName); err != nil {
-		return err
+		return fmt.Errorf("new name: %w", err)
 	}
 	src := New(p, oldName)
 	dst := New(p, newName)

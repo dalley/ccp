@@ -32,7 +32,10 @@ if (!suffix) {
 }
 
 const binDir = path.join(__dirname, "bin");
-const binPath = path.join(binDir, "ccp");
+// Write the native binary to a sibling filename. The shim script that ships
+// in the tarball IS bin/ccp, so naming the native binary "ccp" would make
+// existsSync below trip on our own shim and skip the download permanently.
+const binPath = path.join(binDir, "ccp-bin");
 if (fs.existsSync(binPath)) {
   // Already installed (e.g. developer using `npm link`).
   process.exit(0);

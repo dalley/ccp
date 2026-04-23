@@ -1,0 +1,101 @@
+{
+  "reviewer": "correctness",
+  "findings": [
+    {
+      "id": "COR-001",
+      "title": "npm/install.js writes native binary to the shim's own path, always exits without downloading",
+      "severity": "critical",
+      "confidence": 0.97,
+      "file": "npm/install.js",
+      "lines": "34-39",
+      "description": "install.js computes binPath = path.join(binDir, 'ccp') which resolves to npm/bin/ccp — the exact path of the JavaScript shim tracked in the repository. fs.existsSync(binPath) is always true when the package is installed (the shim ships in the npm tarball), so the script exits at line 38 with process.exit(0) without downloading the platform binary. The shim then looks for npm/bin/ccp-bin (line 7 of npm/bin/ccp) as its primary native binary path, does not find it, and ultimately prints 'native binary missing. Re-run npm install to fetch it.' — making the npm package completely non-functional for end users.",
+      "why_it_matters": "Any user who installs via `npm install -g ccp-cli` receives a broken tool. Every invocation fails with 'native binary missing'. The package ships in a state that can never work without a manual workaround.",
+      "evidence": "npm/install.js:34-35: `const binDir = path.join(__dirname, 'bin'); const binPath = path.join(binDir, 'ccp');` — binPath resolves to npm/bin/ccp. npm/bin/ccp is the shim itself (tracked in git, published in the npm tarball). npm/install.js:36-39: `if (fs.existsSync(binPath)) { process.exit(0); }` — shim exists, exits immediately. npm/bin/ccp:7: `const bin = path.join(__dirname, 'ccp-bin');` — shim looks for npm/bin/ccp-bin, not npm/bin/ccp.",
+      "suggested_fix": "Change npm/install.js lines 34-35 to use 'ccp-bin' as the target filename:\n  const binPath = path.join(binDir, 'ccp-bin');\nAnd update extractBinary call to write to binPath (already done). Also update fs.chmodSync to use binPath. The shim's first check (path.join(__dirname, 'ccp-bin')) then finds the native binary correctly. The shim comment on line 9-10 already describes this intent: 'the native binary lands next to us under a different filename. Keep these names in sync with install.js.'"
+    },
+    {
+      "id": "COR-002",
+      "title": "Rename leaves inconsistent state when source rename succeeds but runtime rename fails",
+      "severity": "high",
+      "confidence": 0.85,
+      "file": "internal/profile/manager.go",
+      "lines": "157-169",
+      "description": "Rename performs two sequential os.Rename calls: (1) source dir (old->new), (2) runtime config dir (old->new). If (1) succeeds but (2) fails — which can happen when dst.ConfigDir already exists as an orphan (e.g., from a prior failed Delete) — the function returns an error without rolling back (1). The resulting state: source lives at dst.SourceDir (new name), runtime stays at src.ConfigDir (old name) with symlinks pointing into src.SourceDir which no longer exists. The profile cannot be listed under oldName (source gone), cannot be listed as newName properly (no runtime dir at expected path), and the manifest may still say oldName is active. The user receives an error but has no automatic recovery path.",
+      "why_it_matters": "After this failure, all ccp commands that look up the profile by name fail. Claude sessions that used the old CLAUDE_CONFIG_DIR now access a runtime dir with dangling symlinks, silently dropping shared config. Recovery requires manual filesystem surgery.",
+      "evidence": "manager.go:157: os.Rename(src.SourceDir, dst.SourceDir) — no rollback if step 2 fails. manager.go:161: os.Rename(src.ConfigDir, dst.ConfigDir) — can fail if dst.ConfigDir exists. The dst existence check on line 153 only checks dst.SourceDir via dst.Exists(), not dst.ConfigDir. There is no defer or explicit rollback that restores src.SourceDir on failure of line 161.",
+      "suggested_fix": "Add a pre-flight check for dst.ConfigDir existence before any rename:\n  if _, err := os.Stat(dst.ConfigDir); err == nil {\n    return fmt.Errorf(\"%w: runtime dir %s already exists\", ErrAlreadyExists, dst.ConfigDir)\n  }\nAlternatively, add rollback on step-2 failure:\n  if err := os.Rename(src.ConfigDir, dst.ConfigDir); err != nil {\n    _ = os.Rename(dst.SourceDir, src.SourceDir) // best-effort rollback\n    return fmt.Errorf(\"rename runtime: %w\", err)\n  }"
+    },
+    {
+      "id": "COR-003",
+      "title": "doctor hint for missing runtime dir suggests 'ccp use' which does not create symlinks",
+      "severity": "medium",
+      "confidence": 0.95,
+      "file": "internal/profile/doctor.go",
+      "lines": "61-65",
+      "description": "When the profile runtime dir does not exist, checkRuntime returns a DoctorFinding with Hint: 'run `ccp use <name>` then launch Claude once to populate it'. But `ccp use` only updates the active_profile field in the manifest — it does not call BuildSymlinks or create the runtime directory. Following this hint leaves CLAUDE_CONFIG_DIR pointing at a non-existent directory; Claude would create it empty on first launch, and no shared config files (settings.json, agents/, etc.) would be symlinked in. The correct command to rebuild the runtime dir and symlinks is `ccp profile refresh <name>`.",
+      "why_it_matters": "A user who follows the doctor hint will unknowingly start Claude without any profile-managed configuration. All profile-specific settings, agents, hooks, and CLAUDE.md would be absent. The user gets no error — Claude just runs with blank config.",
+      "evidence": "doctor.go:63-65: Hint: 'run `ccp use ' + pr.Name + '` then launch Claude once to populate it'. profile_use.go (newProfileUseCmd): only sets s.Manifest.ActiveProfile and calls saveManifest. No call to BuildSymlinks or MkdirAll for ConfigDir anywhere in that path.",
+      "suggested_fix": "Change the Hint in doctor.go to:\n  Hint: \"run `ccp profile refresh \" + pr.Name + \"` to recreate the runtime symlinks\","
+    },
+    {
+      "id": "COR-004",
+      "title": "Create rollback does not clean up partially-created runtime dir on BuildSymlinks failure",
+      "severity": "low",
+      "confidence": 0.88,
+      "file": "internal/profile/manager.go",
+      "lines": "51-56",
+      "description": "The defer rollback in Create (lines 51-56) removes pr.SourceDir if success is false, but BuildSymlinks (line 74) may have created pr.ConfigDir and written some symlinks before encountering an error. Neither the defer nor any other code removes pr.ConfigDir on failure. The orphaned runtime dir is visible at ~/.claude-<name>/ with dangling symlinks pointing into the now-deleted source dir. A subsequent retry of `ccp profile create <name>` will succeed (source dir is gone so Exists() returns false), and ensureSymlink will re-link correctly because the source and target paths are the same. However, between the failed create and the retry the user sees a confusing half-initialized directory.",
+      "why_it_matters": "Low impact in practice because retrying creates successfully. However, a user running `ls ~/.claude-<name>/` after a failed create sees dangling symlinks with no explanation.",
+      "evidence": "manager.go:51-57: defer removes pr.SourceDir on failure, no removal of pr.ConfigDir. symlinks.go:17-19: BuildSymlinks calls os.MkdirAll(pr.ConfigDir) before any ensureSymlink calls — so ConfigDir is created even if a later ensureSymlink fails.",
+      "suggested_fix": "Extend the rollback defer to also remove the ConfigDir on failure:\n  defer func() {\n    if !success {\n      _ = os.RemoveAll(pr.SourceDir)\n      _ = os.RemoveAll(pr.ConfigDir) // remove partial runtime dir\n    }\n  }()"
+    },
+    {
+      "id": "COR-005",
+      "title": "backup.Latest() is called outside the lock in profile_rollback.go creating a TOCTOU gap",
+      "severity": "low",
+      "confidence": 0.80,
+      "file": "internal/cli/profile_rollback.go",
+      "lines": "21-37",
+      "description": "In the rollback command, backup.Latest() is called at line 21 before acquiring the ccp global lock at line 29. Between resolving the 'latest' backup path and taking the lock, a concurrent ccp operation (e.g., another `ccp profile delete` that triggers backup.Prune) could delete that backup directory. The subsequent profile.Rollback() call at line 30 would then call os.Stat(backupDir) and return an error — so no silent data corruption occurs, but the user gets a misleading error message ('stat backup ... no such file or directory') rather than 'no backups to restore from'.",
+      "why_it_matters": "In normal single-user operation this race is irrelevant. It becomes relevant in scripted/CI use where multiple ccp invocations could run concurrently. The failure mode is a confusing error, not data loss.",
+      "evidence": "profile_rollback.go:21: latest, err := backup.Latest(s.Paths.BackupsDir) — outside lock. profile_rollback.go:29: err = withLock(s.Paths, func() error { r, ierr := profile.Rollback(s.Paths, latest) }). backup.Prune (called inside withLock in profile_delete.go) can remove the 'latest' backup between lines 21 and 29.",
+      "suggested_fix": "Move backup.Latest() inside the withLock closure:\n  err = withLock(s.Paths, func() error {\n    latest, err := backup.Latest(s.Paths.BackupsDir)\n    if err != nil { return err }\n    if latest == \"\" { return fmt.Errorf(\"no backups to restore from\") }\n    r, ierr := profile.Rollback(s.Paths, latest)\n    ...\n  })"
+    }
+  ],
+  "residual_risks": [
+    {
+      "area": "sync/copy.go copyDir — open file handle leak path",
+      "detail": "In the WalkFunc inside copyDir, `defer in.Close()` runs when each WalkFunc invocation returns. If os.OpenFile(target, ...) fails after os.Open(path) succeeds, `in` is closed by the deferred call. This is correct. However, if many files fail to open concurrently (high parallel walk), each failed invocation still consumes a file descriptor until the WalkFunc returns. Since filepath.Walk is sequential this is not actually a problem; noted for completeness."
+    },
+    {
+      "area": "sync.InitRepo .gitignore overwrite on re-run",
+      "detail": "InitRepo always overwrites .gitignore with a fixed GitignoreContents string, even when re-invoked via `ccp sync setup`. If a user added custom patterns to .gitignore between setup runs, those patterns are silently lost on the next setup invocation. This is a data-loss risk for configuration files the user may have tuned, though it only affects git-ignored paths."
+    },
+    {
+      "area": "sync/sync.go CloneOrOpen atomicity",
+      "detail": "CloneOrOpen moves the cloned .git directory into configDir, then iterates tmp entries to merge-copy the working tree. If the merge-copy loop fails mid-way, configDir has a valid .git (so IsSyncRepo returns true) but a partial working tree. The subsequent InitRepo call would try to commit but the working tree is inconsistent with HEAD. This can leave the sync repo in a state requiring manual git intervention. Low probability with local filesystem copies but possible on resource exhaustion."
+    },
+    {
+      "area": "npm tar extractor type-field handling",
+      "detail": "extractBinary in npm/install.js checks `type === '0'` for regular files (POSIX type character, ASCII 0x30). Some tar implementations write NUL (0x00) for regular files. String.fromCharCode(0x00) === '\\x00' which does not equal '0'. If goreleaser's tar output uses NUL for the binary entry type (which would be non-standard), extractBinary would skip the binary and throw 'ccp not found in archive'. In practice, goreleaser uses GNU tar or BSD tar which write '0' (0x30), so this is low risk."
+    }
+  ],
+  "testing_gaps": [
+    {
+      "gap": "No test exercises the npm postinstall flow end-to-end",
+      "detail": "There are no tests for npm/install.js. The binary-path mismatch bug (COR-001) would be caught immediately by any test that simulates npm install and then runs the shim."
+    },
+    {
+      "gap": "No test for Rename partial failure (runtime rename fails after source rename succeeds)",
+      "detail": "The Rename tests in the lifecycle test only exercise the happy path. A test that pre-creates ~/.claude-newname as a non-empty directory before calling `ccp profile rename old new` would expose the COR-002 inconsistent-state issue on Linux."
+    },
+    {
+      "gap": "No test for doctor hint correctness",
+      "detail": "TestDoctorHealthyReportsSuccess and TestDoctorDetectsDanglingSymlinkAndExitsNonzero test detection but not hint text accuracy. A test that deletes the runtime dir, runs doctor, captures the hint, and verifies it points to `ccp profile refresh` (not `ccp use`) would prevent COR-003 regressions."
+    },
+    {
+      "gap": "No test for backup.Latest() and Rollback under concurrent delete+prune",
+      "detail": "The TOCTOU gap in COR-005 is untestable with the current sequential test harness. An integration test with two goroutines (one running delete, one running rollback) would be needed."
+    }
+  ]
+}

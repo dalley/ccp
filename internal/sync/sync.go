@@ -10,10 +10,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
-
-	"github.com/dalley/ccp/internal/paths"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -232,13 +231,9 @@ func StageAndCommit(configDir string) (bool, error) {
 	return true, nil
 }
 
-// PushOptions controls Push.
-type PushOptions struct {
-	DryRun bool
-}
-
-// Push pushes the default branch to origin.
-func Push(configDir string, opts PushOptions) error {
+// Push pushes the default branch to origin. Dry-run is expressed at the CLI
+// layer by short-circuiting before calling Push, not as a parameter here.
+func Push(configDir string) error {
 	repo, err := git.PlainOpen(configDir)
 	if err != nil {
 		return err
@@ -347,12 +342,12 @@ func hardReset(configDir string) error {
 
 // StatusSummary is what `ccp sync status` reports.
 type StatusSummary struct {
-	Remote     string
-	RepoExists bool
-	Dirty      bool
-	ChangedFiles []string
+	Remote        string
+	RepoExists    bool
+	Dirty         bool
+	ChangedFiles  []string
 	CurrentBranch string
-	AheadBehind string // human text like "up to date" or "N ahead, M behind"
+	AheadBehind   string // human text like "up to date" or "N ahead, M behind"
 }
 
 // Status reads the current repo state.
@@ -388,6 +383,9 @@ func Status(configDir string) (StatusSummary, error) {
 	for file := range status {
 		out.ChangedFiles = append(out.ChangedFiles, file)
 	}
+	// Go map iteration is random; sort so repeated `sync status` calls
+	// produce byte-identical output that agents can safely diff.
+	sort.Strings(out.ChangedFiles)
 	// We don't compute ahead/behind here — it requires a fetch, which may
 	// hang on network failure. Leaving AheadBehind as informational text.
 	out.AheadBehind = "run `git -C " + configDir + " status -sb` for ahead/behind"
@@ -463,6 +461,7 @@ func CloneOrOpen(configDir, remoteURL string) error {
 // mergeCopyDir is copyDir without the "target parent must not exist"
 // assumption — it walks src and writes each entry into dst, merging with
 // anything already there. Files with matching paths are overwritten.
+// Symlinks whose target escapes the source tree are refused.
 func mergeCopyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -474,15 +473,18 @@ func mergeCopyDir(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 		switch {
-		case info.IsDir():
-			return os.MkdirAll(target, info.Mode().Perm())
 		case info.Mode()&os.ModeSymlink != 0:
 			link, err := os.Readlink(path)
 			if err != nil {
 				return err
 			}
+			if !symlinkWithin(path, link, src) {
+				return fmt.Errorf("refusing to copy symlink %q → %q: target escapes source tree", path, link)
+			}
 			_ = os.Remove(target)
 			return os.Symlink(link, target)
+		case info.IsDir():
+			return os.MkdirAll(target, info.Mode().Perm())
 		default:
 			b, err := os.ReadFile(path)
 			if err != nil {
@@ -511,8 +513,3 @@ func signature() *object.Signature {
 	}
 	return &object.Signature{Name: name, Email: email, When: time.Now()}
 }
-
-// pathsHelper is a convenience alias kept alongside the sync code so callers
-// don't need to import paths here for one field. Currently only used by
-// tests; the Paths type is the real public API.
-type pathsHelper = paths.Paths

@@ -27,8 +27,14 @@ func newProfileDiffCmd() *cobra.Command {
 					return fmt.Errorf("no second profile given and no active profile set")
 				}
 			}
-			a := profile.New(s.Paths, aName)
-			b := profile.New(s.Paths, bName)
+			a, err := profile.NewChecked(s.Paths, aName)
+			if err != nil {
+				return err
+			}
+			b, err := profile.NewChecked(s.Paths, bName)
+			if err != nil {
+				return err
+			}
 			if !a.Exists() {
 				return fmt.Errorf("profile %q not found", aName)
 			}

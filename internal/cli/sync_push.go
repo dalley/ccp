@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	ccpsync "github.com/dalley/ccp/internal/sync"
@@ -18,7 +19,7 @@ func newSyncPushCmd() *cobra.Command {
 				return err
 			}
 			if ok, _ := ccpsync.IsSyncRepo(s.Paths.ConfigDir); !ok {
-				return fmt.Errorf("sync not set up — run `ccp sync setup --url <git>` first")
+				return errors.New("sync not set up — run `ccp sync setup --url <git>` first")
 			}
 
 			return withLock(s.Paths, func() error {
@@ -47,7 +48,7 @@ func newSyncPushCmd() *cobra.Command {
 					fmt.Fprintln(out, "No remote configured; skipping push.")
 					return nil
 				}
-				if err := ccpsync.Push(s.Paths.ConfigDir, ccpsync.PushOptions{DryRun: dryRun}); err != nil {
+				if err := ccpsync.Push(s.Paths.ConfigDir); err != nil {
 					return fmt.Errorf("push: %w", err)
 				}
 				fmt.Fprintln(out, "Pushed to", remote)

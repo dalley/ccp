@@ -4,10 +4,12 @@ package profile
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/dalley/ccp/internal/paths"
 )
@@ -20,7 +22,7 @@ var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 // ValidateName returns nil if name is a legal profile name.
 func ValidateName(name string) error {
 	if !nameRe.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q: must match %s", name, nameRe)
+		return fmt.Errorf("invalid profile name %q: must start with a lowercase letter, contain only [a-z0-9_-], and be 1-63 characters long", name)
 	}
 	return nil
 }
@@ -33,13 +35,24 @@ type Profile struct {
 }
 
 // New constructs a Profile value from Paths and a name. It does not touch
-// the filesystem.
+// the filesystem. Callers that take the name from untrusted input (manifest,
+// CLI args) must call ValidateName first or use NewChecked.
 func New(p paths.Paths, name string) Profile {
 	return Profile{
 		Name:      name,
 		SourceDir: p.ProfileSourceDir(name),
 		ConfigDir: p.ProfileConfigDir(name),
 	}
+}
+
+// NewChecked is New with ValidateName applied first. Use this on any path
+// where the name crosses a trust boundary (CLI arguments, manifest fields,
+// sync-pulled marker files).
+func NewChecked(p paths.Paths, name string) (Profile, error) {
+	if err := ValidateName(name); err != nil {
+		return Profile{}, err
+	}
+	return New(p, name), nil
 }
 
 // Exists reports whether the profile's source directory is present.
@@ -74,6 +87,11 @@ func List(p paths.Paths) ([]Profile, error) {
 
 // copyTree recursively copies src into dst. Regular files, directories, and
 // symlinks are handled. Modes are preserved. Permission errors abort.
+//
+// Symlinks are only reproduced when their resolved target stays inside src.
+// A profile cloned from a hostile git remote could otherwise carry a link
+// like settings.json -> /etc/passwd that ccp would silently materialize in
+// the user's config.
 func copyTree(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -91,6 +109,9 @@ func copyTree(src, dst string) error {
 			if err != nil {
 				return err
 			}
+			if !symlinkWithin(path, link, src) {
+				return fmt.Errorf("refusing to copy symlink %q → %q: target escapes profile source", path, link)
+			}
 			return os.Symlink(link, target)
 		case info.IsDir():
 			return os.MkdirAll(target, info.Mode().Perm())
@@ -98,6 +119,26 @@ func copyTree(src, dst string) error {
 			return copyFile(path, target, info.Mode().Perm())
 		}
 	})
+}
+
+// symlinkWithin reports whether a symlink at linkPath pointing at linkTarget
+// resolves to a path inside srcRoot. Accepts either absolute or relative
+// linkTarget values.
+func symlinkWithin(linkPath, linkTarget, srcRoot string) bool {
+	abs := linkTarget
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(filepath.Dir(linkPath), abs)
+	}
+	abs = filepath.Clean(abs)
+	absRoot, err := filepath.Abs(srcRoot)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, abs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, "..")
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -113,7 +154,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if _, err := copyReader(out, in); err != nil {
+	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
 		return err
 	}
