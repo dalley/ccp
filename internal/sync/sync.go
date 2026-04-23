@@ -343,12 +343,31 @@ func Pull(configDir string, opts PullOptions) (bool, error) {
 // wrapNetwork decorates network-class errors from go-git with
 // ErrRemoteUnreachable so the CLI maps them to ExitNetwork. Leaves other
 // errors (auth, protocol, disk) alone — auth failures are user-class.
+//
+// This is string-based because go-git does not expose typed network-class
+// sentinels for most failures. The hint list errs on the side of broad
+// coverage; a false-positive (mis-classifying an auth error as network)
+// costs an agent one unnecessary retry, whereas a false-negative leaks a
+// network failure into ExitUser and breaks retry logic entirely.
 func wrapNetwork(err error) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
-	netHints := []string{"no such host", "connection refused", "timeout", "i/o timeout", "unreachable", "context deadline"}
+	netHints := []string{
+		"no such host",
+		"connection refused",
+		"connection reset",
+		"network is unreachable",
+		"no route to host",
+		"server misbehaving", // systemd-resolved DNS failure on Linux
+		"tls handshake timeout",
+		"timeout",
+		"i/o timeout",
+		"unreachable",
+		"context deadline",
+		"context canceled",
+	}
 	for _, h := range netHints {
 		if strings.Contains(msg, h) {
 			return fmt.Errorf("%w: %v", ErrRemoteUnreachable, err)
@@ -526,7 +545,14 @@ func countExcluding(repo *git.Repository, head, exclude plumbing.Hash) (int, err
 	for {
 		c, err := iter.Next()
 		if err != nil {
-			break
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			// Don't treat pack-object corruption or any other iter error
+			// as end-of-log. Surface so StatusWithFetch can report it in
+			// StatusSummary.FetchError rather than returning a
+			// silently-wrong count.
+			return 0, err
 		}
 		if _, stop := seen[c.Hash]; stop {
 			break
@@ -545,7 +571,10 @@ func walkAncestors(repo *git.Repository, start plumbing.Hash, out map[plumbing.H
 	for {
 		c, err := iter.Next()
 		if err != nil {
-			return nil
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
 		}
 		out[c.Hash] = struct{}{}
 	}

@@ -130,7 +130,20 @@ function download(url, deadline, maxBytes) {
 
     function follow(u, depth, done) {
       if (depth <= 0) return done(new Error("too many redirects"));
-      const parsed = new URL(u);
+      // Guard new URL(u) against missing / relative / malformed Location
+      // values. Without this, a server that emits a relative 302 (or
+      // omits Location entirely) throws synchronously inside the https
+      // response callback, which Node does not route through our reject
+      // path — it becomes an uncaught exception.
+      let parsed;
+      try {
+        parsed = new URL(u);
+      } catch (e) {
+        return done(new Error(`invalid redirect URL ${JSON.stringify(u)}: ${e.message}`));
+      }
+      if (parsed.protocol !== "https:") {
+        return done(new Error(`refusing non-HTTPS redirect to ${u}`));
+      }
       if (!ALLOWED_HOSTS.some((re) => re.test(parsed.hostname))) {
         return done(new Error(`refusing redirect to disallowed host ${parsed.hostname}`));
       }
@@ -138,7 +151,19 @@ function download(url, deadline, maxBytes) {
         if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
           // Drain so the socket is returned to the agent, then follow.
           res.resume();
-          return follow(res.headers.location, depth - 1, done);
+          const next = res.headers.location;
+          if (!next) {
+            return done(new Error(`${res.statusCode} redirect from ${u} with no Location header`));
+          }
+          // Resolve relative Location values against the current URL per
+          // RFC 7231 § 7.1.2.
+          let nextAbs;
+          try {
+            nextAbs = new URL(next, u).toString();
+          } catch (e) {
+            return done(new Error(`invalid Location header ${JSON.stringify(next)}: ${e.message}`));
+          }
+          return follow(nextAbs, depth - 1, done);
         }
         if (res.statusCode !== 200) {
           return done(new Error(`HTTP ${res.statusCode} from ${u}`));

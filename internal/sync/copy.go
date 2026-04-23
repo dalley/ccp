@@ -5,7 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/dalley/ccp/internal/fsutil"
 )
 
 // copyDir recursively copies src into dst. Symlinks are reproduced only
@@ -58,21 +59,9 @@ func copyDir(src, dst string) error {
 	})
 }
 
-// symlinkWithin reports whether a symlink at linkPath pointing at linkTarget
-// resolves inside srcRoot. Accepts absolute or relative linkTarget values.
+// symlinkWithin is a package-local alias for fsutil.SymlinkWithin, mirroring
+// the helper in internal/profile. Both call sites in this package use the
+// short name; the shared implementation lives in fsutil.
 func symlinkWithin(linkPath, linkTarget, srcRoot string) bool {
-	abs := linkTarget
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(filepath.Dir(linkPath), abs)
-	}
-	abs = filepath.Clean(abs)
-	absRoot, err := filepath.Abs(srcRoot)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absRoot, abs)
-	if err != nil {
-		return false
-	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	return fsutil.SymlinkWithin(linkPath, linkTarget, srcRoot)
 }

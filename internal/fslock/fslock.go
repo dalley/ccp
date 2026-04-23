@@ -18,10 +18,11 @@ import (
 )
 
 // DefaultTimeout is the ceiling Acquire waits before returning
-// ErrLockContended. It is short enough that a hung ccp process (e.g. a
-// blocked `sync pull`) cannot silently pin every future invocation, but
-// long enough that normal back-to-back commands are never bothered.
-const DefaultTimeout = 30 * time.Second
+// ErrLockContended. Must exceed sync.NetworkTimeout (60s) so a long-running
+// `ccp sync pull` doesn't starve every concurrent profile command — the
+// starvation produces ExitConflict which agents interpret as a real profile
+// conflict, not a wait.
+const DefaultTimeout = 90 * time.Second
 
 // ErrLockContended is returned when Acquire's deadline elapses without
 // getting the lock. Callers use errors.Is to surface a retry hint.

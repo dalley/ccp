@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
 
+	"github.com/dalley/ccp/internal/fsutil"
 	"github.com/dalley/ccp/internal/paths"
 )
 
@@ -121,24 +121,11 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// symlinkWithin reports whether a symlink at linkPath pointing at linkTarget
-// resolves to a path inside srcRoot. Accepts either absolute or relative
-// linkTarget values.
+// symlinkWithin is a package-local alias for fsutil.SymlinkWithin. Keeping
+// the name short at call sites; the real implementation and tests live in
+// internal/fsutil so profile and sync share the same security invariant.
 func symlinkWithin(linkPath, linkTarget, srcRoot string) bool {
-	abs := linkTarget
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(filepath.Dir(linkPath), abs)
-	}
-	abs = filepath.Clean(abs)
-	absRoot, err := filepath.Abs(srcRoot)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(absRoot, abs)
-	if err != nil {
-		return false
-	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	return fsutil.SymlinkWithin(linkPath, linkTarget, srcRoot)
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {

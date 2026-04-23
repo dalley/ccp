@@ -115,6 +115,20 @@ ccp completion {zsh,bash,fish}        completion script
 ccp version
 ```
 
+## Exit codes
+
+Every `ccp` command returns one of these codes so agents can branch without parsing stderr:
+
+| Code | Meaning | Examples |
+|---|---|---|
+| `0` | success | any command that completed its intent |
+| `1` | user error | invalid profile name, missing required argument, unknown subcommand |
+| `2` | state or IO error | manifest unreadable, disk full (`ENOSPC`), read-only filesystem (`EROFS`), permission denied |
+| `3` | network error | unreachable remote, DNS failure, HTTPS TLS issues on git push/pull/clone/fetch |
+| `4` | conflict | `ErrAlreadyExists` on create, dirty tree on `sync pull`, lock held by another ccp process |
+
+The mapping lives in [`internal/cli/exit.go`](internal/cli/exit.go). Agents can rely on these codes staying stable across patch releases within a minor version.
+
 ## How switching works
 
 A ccp "profile" is a directory under `~/.config/ccp/profiles/<name>/` holding the portable subset of Claude's config (settings.json, agents/, commands/, hooks/, skills/, output-styles/, keybindings.json, CLAUDE.md). When you activate a profile, ccp sets `CLAUDE_CONFIG_DIR=$HOME/.claude-<name>`, a runtime directory of symlinks back into the source. Claude writes session/auth/cache files there; the symlinks keep shareable config in sync.

@@ -67,6 +67,9 @@ func newProfileCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromProfile, "from", "", "seed from an existing profile")
 	cmd.Flags().BoolVar(&withAlias, "alias", false, "install a shell alias `claude-<name>` that launches Claude with this profile")
 	cmd.Flags().StringVar(&shellrc, "shellrc", "", "path to the shellrc to write the alias into (defaults to ~/.zshrc or ~/.bashrc)")
+	// Dynamic completion for --from: offer real profile names instead of
+	// falling back to filesystem path completion.
+	_ = cmd.RegisterFlagCompletionFunc("from", completeProfileName)
 	return cmd
 }
 
