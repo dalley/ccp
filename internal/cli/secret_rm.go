@@ -1,0 +1,53 @@
+//go:build !windows
+
+package cli
+
+import (
+	"fmt"
+
+	"github.com/dalley/ccp/internal/profile"
+	"github.com/dalley/ccp/internal/secret"
+	"github.com/spf13/cobra"
+)
+
+// newSecretRmCmd wires `ccp secret rm <profile> <key>`.
+//
+// Idempotent: removing a nonexistent key succeeds silently (secret.Delete
+// already swallows NotFound from both backends). No confirmation prompt —
+// removal from the keychain is low-stakes: the user can re-set. Matches the
+// plan's "single-key rm is safe" stance vs the bulk-rm case we explicitly
+// punted.
+//
+// Goes through withLockedState so a concurrent `secret set` + `secret rm`
+// pair against the file-fallback store don't race on the index/fallback
+// files. Same discipline as `secret set`.
+func newSecretRmCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:               "rm <profile> <key>",
+		Short:             "Remove the stored secret for <profile>/<key> (idempotent)",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeProfileName,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			prof := args[0]
+			key := args[1]
+			if err := profile.ValidateName(prof); err != nil {
+				return err
+			}
+			if err := secret.ValidateKey(key); err != nil {
+				return err
+			}
+			s, err := loadState()
+			if err != nil {
+				return err
+			}
+			if err := withLockedState(s.Paths, func(s *state) error {
+				return secret.Delete(s.Paths, prof, key)
+			}); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed secret %s/%s\n", prof, key)
+			return nil
+		},
+	}
+	return cmd
+}

@@ -42,6 +42,12 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newPromptCmd())
 	root.AddCommand(newAllowCmd())
 	root.AddCommand(newDenyCmd())
+	// `ccp secret` is platform-gated: the internal/secret package's Windows
+	// stubs return ErrUnsupportedPlatform for every operation, and listing
+	// commands in --help on a platform where they can't work is worse than
+	// hiding them. registerSecretCmd is a no-op on Windows (see
+	// secret_windows.go) and AddCommand(newSecretCmd()) on POSIX.
+	registerSecretCmd(root)
 
 	return root
 }
