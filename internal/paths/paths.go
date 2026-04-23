@@ -15,13 +15,16 @@ import (
 
 // Paths holds the resolved filesystem layout for one ccp invocation.
 type Paths struct {
-	Home         string // $HOME (or CCP_ROOT when set)
-	ConfigDir    string // ~/.config/ccp (XDG-aware)
-	ProfilesDir  string // <ConfigDir>/profiles
-	BackupsDir   string // <ConfigDir>/backups
-	ManifestPath string // <ConfigDir>/manifest.toml
-	LockPath     string // <ConfigDir>/lock
-	ClaudeHome   string // ~/.claude — Claude's default config directory
+	Home               string // $HOME (or CCP_ROOT when set)
+	ConfigDir          string // ~/.config/ccp (XDG-aware)
+	ProfilesDir        string // <ConfigDir>/profiles
+	BackupsDir         string // <ConfigDir>/backups
+	SecretsDir         string // <ConfigDir>/secrets — file-fallback store for per-profile keychain entries
+	RuntimeManifestDir string // <ConfigDir>/runtime-manifest — tracks which runtime files ccp rendered (vs symlinked or Claude-created)
+	ManifestPath       string // <ConfigDir>/manifest.toml
+	AllowlistPath      string // <ConfigDir>/allowlist.toml — per-machine .claude-profile approval state
+	LockPath           string // <ConfigDir>/lock
+	ClaudeHome         string // ~/.claude — Claude's default config directory
 }
 
 // Resolve builds a Paths from the current environment. It does not create
@@ -38,13 +41,16 @@ func Resolve() (Paths, error) {
 	}
 
 	return Paths{
-		Home:         home,
-		ConfigDir:    config,
-		ProfilesDir:  filepath.Join(config, "profiles"),
-		BackupsDir:   filepath.Join(config, "backups"),
-		ManifestPath: filepath.Join(config, "manifest.toml"),
-		LockPath:     filepath.Join(config, "lock"),
-		ClaudeHome:   filepath.Join(home, ".claude"),
+		Home:               home,
+		ConfigDir:          config,
+		ProfilesDir:        filepath.Join(config, "profiles"),
+		BackupsDir:         filepath.Join(config, "backups"),
+		SecretsDir:         filepath.Join(config, "secrets"),
+		RuntimeManifestDir: filepath.Join(config, "runtime-manifest"),
+		ManifestPath:       filepath.Join(config, "manifest.toml"),
+		AllowlistPath:      filepath.Join(config, "allowlist.toml"),
+		LockPath:           filepath.Join(config, "lock"),
+		ClaudeHome:         filepath.Join(home, ".claude"),
 	}, nil
 }
 
@@ -60,10 +66,25 @@ func (p Paths) ProfileConfigDir(name string) string {
 	return filepath.Join(p.Home, ".claude-"+name)
 }
 
+// SecretFilePath returns the on-disk path of the file-fallback secret store
+// for the named profile. The file may or may not exist; presence is load-
+// bearing (secrets have been written via the fallback path).
+func (p Paths) SecretFilePath(name string) string {
+	return filepath.Join(p.SecretsDir, name+".json")
+}
+
+// RuntimeManifestPath returns the on-disk path of the runtime manifest that
+// tracks which files ccp has rendered into a profile's runtime dir. Used by
+// BuildSymlinks / RefreshSymlinks to distinguish ccp-owned regular files
+// from Claude-created content.
+func (p Paths) RuntimeManifestPath(name string) string {
+	return filepath.Join(p.RuntimeManifestDir, name+".json")
+}
+
 // Ensure creates the persistent ccp directories if they don't yet exist.
 // Safe to call repeatedly.
 func (p Paths) Ensure() error {
-	for _, d := range []string{p.ConfigDir, p.ProfilesDir, p.BackupsDir} {
+	for _, d := range []string{p.ConfigDir, p.ProfilesDir, p.BackupsDir, p.SecretsDir, p.RuntimeManifestDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}

@@ -37,7 +37,7 @@ func TestEnsureCreatesDirs(t *testing.T) {
 	if err := p.Ensure(); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	for _, d := range []string{p.ConfigDir, p.ProfilesDir, p.BackupsDir} {
+	for _, d := range []string{p.ConfigDir, p.ProfilesDir, p.BackupsDir, p.SecretsDir, p.RuntimeManifestDir} {
 		info, err := statDir(d)
 		if err != nil {
 			t.Fatalf("stat %s: %v", d, err)
@@ -45,6 +45,36 @@ func TestEnsureCreatesDirs(t *testing.T) {
 		if !info.IsDir() {
 			t.Errorf("%s is not a dir", d)
 		}
+		if info.Mode().Perm() != 0o700 {
+			t.Errorf("%s has mode %v, want 0700", d, info.Mode().Perm())
+		}
+	}
+}
+
+func TestSecretAndAllowlistPaths(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CCP_ROOT", root)
+
+	p, _ := Resolve()
+	wantSecrets := filepath.Join(root, ".config", "ccp", "secrets")
+	if p.SecretsDir != wantSecrets {
+		t.Errorf("SecretsDir = %q, want %q", p.SecretsDir, wantSecrets)
+	}
+	wantSecretFile := filepath.Join(wantSecrets, "work.json")
+	if got := p.SecretFilePath("work"); got != wantSecretFile {
+		t.Errorf("SecretFilePath(work) = %q, want %q", got, wantSecretFile)
+	}
+	wantAllowlist := filepath.Join(root, ".config", "ccp", "allowlist.toml")
+	if p.AllowlistPath != wantAllowlist {
+		t.Errorf("AllowlistPath = %q, want %q", p.AllowlistPath, wantAllowlist)
+	}
+	wantRM := filepath.Join(root, ".config", "ccp", "runtime-manifest")
+	if p.RuntimeManifestDir != wantRM {
+		t.Errorf("RuntimeManifestDir = %q, want %q", p.RuntimeManifestDir, wantRM)
+	}
+	wantRMFile := filepath.Join(wantRM, "work.json")
+	if got := p.RuntimeManifestPath("work"); got != wantRMFile {
+		t.Errorf("RuntimeManifestPath(work) = %q, want %q", got, wantRMFile)
 	}
 }
 
