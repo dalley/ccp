@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/dalley/ccp/internal/profile"
 	ccpsync "github.com/dalley/ccp/internal/sync"
 	"github.com/spf13/cobra"
 )
 
 func newSyncPushCmd() *cobra.Command {
 	var dryRun bool
+	var quiet bool
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Commit changes and push to origin",
@@ -20,6 +22,20 @@ func newSyncPushCmd() *cobra.Command {
 			}
 			if ok, _ := ccpsync.IsSyncRepo(s.Paths.ConfigDir); !ok {
 				return errors.New("sync not set up — run `ccp sync setup --url <git>` first")
+			}
+
+			// Advisory audit on the active profile BEFORE push so the user
+			// sees the warning in the same output where they'd notice
+			// cleartext secrets about to travel to a git remote. This is a
+			// soft warning only — the push proceeds either way. If the user
+			// is intentionally syncing a profile with ref placeholders
+			// (which render as cleartext hits), `--quiet` silences the noise.
+			if !quiet && s.Manifest.ActiveProfile != "" {
+				if findings, aerr := profile.Audit(s.Paths, s.Manifest.ActiveProfile); aerr == nil && len(findings) > 0 {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"ccp: %d suspected secrets detected in profile %s; review with 'ccp profile audit'\n",
+						len(findings), s.Manifest.ActiveProfile)
+				}
 			}
 
 			return withLock(s.Paths, func() error {
@@ -57,5 +73,6 @@ func newSyncPushCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would happen without pushing")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress the pre-push secret-audit advisory")
 	return cmd
 }

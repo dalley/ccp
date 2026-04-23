@@ -199,3 +199,59 @@ func TestSyncStatusJSON(t *testing.T) {
 func testSig() *object.Signature {
 	return &object.Signature{Name: "test", Email: "test@example", When: time.Now()}
 }
+
+// TestSyncPushAdvisoryFiresOnDirtyProfile covers the pre-push audit
+// advisory: when the active profile's source tree contains a plantable
+// secret, `ccp sync push` should print a stderr line naming the count and
+// the profile, but must NOT block the push (audit is advisory here — the
+// user may have staged-but-redacted placeholders, or legitimately want to
+// push the warning snapshot). The `--quiet` flag silences the advisory.
+func TestSyncPushAdvisoryFiresOnDirtyProfile(t *testing.T) {
+	root := setupCLI(t)
+	bare := initBareTestRepo(t)
+	if _, _, err := runCLI(t, "", "sync", "setup", "--url", bare); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runCLI(t, "", "use", "work"); err != nil {
+		t.Fatal(err)
+	}
+	// Plant an AKIA-prefixed cleartext AWS key in the profile. This is a
+	// canonical audit trip: matches structuralDetectors without needing
+	// entropy scoring.
+	settingsPath := filepath.Join(root, ".config/ccp/profiles/work/settings.json")
+	if err := os.WriteFile(settingsPath,
+		[]byte(`{"key": "AKIAIOSFODNN7EXAMPLE"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Default push — advisory should fire on stderr, push still succeeds.
+	_, stderr, err := runCLI(t, "", "sync", "push")
+	if err != nil {
+		t.Fatalf("push: %v\n%s", err, stderr)
+	}
+	if !strings.Contains(stderr, "suspected secrets detected in profile work") {
+		t.Errorf("advisory missing from stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "ccp profile audit") {
+		t.Errorf("advisory should point to audit command:\n%s", stderr)
+	}
+
+	// --quiet should suppress it. Mutate the file again so there's
+	// something to commit on the second push (otherwise it short-circuits
+	// before even reaching the advisory path, which is also fine, but
+	// then we wouldn't be testing the suppression itself).
+	if err := os.WriteFile(settingsPath,
+		[]byte(`{"key": "AKIAIOSFODNN7EXAMPLE", "note": "v2"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err = runCLI(t, "", "sync", "push", "--quiet")
+	if err != nil {
+		t.Fatalf("quiet push: %v\n%s", err, stderr)
+	}
+	if strings.Contains(stderr, "suspected secrets") {
+		t.Errorf("--quiet did not suppress advisory:\n%s", stderr)
+	}
+}

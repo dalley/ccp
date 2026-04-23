@@ -107,12 +107,20 @@ ccp current                           print active profile name
 ccp use <name> [--shell]              shortcut for `ccp profile use`
 ccp exec <name> -- <cmd...>           run <cmd> with CLAUDE_CONFIG_DIR set
 ccp sync setup [--url <git>]
-ccp sync push [--dry-run]
+ccp sync push [--dry-run] [--quiet]   --quiet suppresses the pre-push audit advisory
 ccp sync pull [--force]               non-destructive by default
 ccp sync status
 ccp prompt [--prefix X] [--suffix Y]  print active profile (empty if none)
 ccp completion {zsh,bash,fish}        completion script
 ccp version
+ccp secret set <profile> <key>           store a value in the OS keychain (file fallback)
+ccp secret get <profile> <key>           read a stored value
+ccp secret list <profile> [--json]       list stored keys
+ccp secret rm <profile> <key>            remove a stored value
+ccp allow [--status] [--json]            approve the current dir's .claude-profile
+ccp deny                                 revoke current dir's .claude-profile approval
+ccp profile audit <name> [--json]        detect suspected secrets in a profile
+ccp profile export <name> [-o path]      export a portable tarball (strips secrets by default)
 ```
 
 ## Exit codes
@@ -141,6 +149,46 @@ Activation is resolved in this order:
 
 Your default `~/.claude/` is never touched. Remove the `shell-init` line from your shellrc to reverse everything.
 
+## Secrets and references (v2 preview)
+
+Profile files can contain `{{ keychain:KEY }}`, `{{ op://vault/item/field }}`, and `{{ env.VAR }}` references that ccp resolves at activation time into real files in the runtime directory (`~/.claude-<name>/`). Only resolved, real-valued files ever reach Claude Code; the source tree in `profiles/<name>/` keeps the ref text. Keychain values are stored via `ccp secret set` — the OS keychain (macOS Keychain, libsecret on Linux) is used where available, with a file fallback to `~/.config/ccp/secrets/<profile>.json` (mode 0600, gitignored, per-profile). `op://` refs shell out to the 1Password CLI.
+
+### Quickstart
+
+```sh
+ccp secret set work ANTHROPIC_API_KEY sk-xxx
+# Then in ~/.config/ccp/profiles/work/settings.json:
+# "apiKey": "{{ keychain:ANTHROPIC_API_KEY }}"
+ccp use work   # settings.json is now rendered with the resolved value
+```
+
+### Auditing existing profiles
+
+```sh
+ccp profile audit work
+```
+Scans for suspected secrets (AWS keys, GitHub tokens, Stripe keys, JWTs, PEM private keys, high-entropy strings) so you can migrate them to keychain storage.
+
+### Escape sequence for literal refs
+
+`{{!}}` preceding a ref makes it literal — use this when documenting the syntax inside a profile file that ccp will render.
+
+## Auto-activation (v2 preview)
+
+Drop a `.claude-profile` file in a project root containing a single-line profile name:
+
+```
+work
+```
+
+Approve it once: `ccp allow`. After that, `cd`ing into the project (or any subdir) automatically sets `CLAUDE_CONFIG_DIR` for new and existing shells via the `shell-init` hook. Safety model is direnv-style fail-closed: unapproved or modified markers warn once and do nothing.
+
+### Escape hatches
+
+- `CCP_PROFILE_AUTO=0` — disable the auto-activation layer entirely
+- Setting `CLAUDE_CONFIG_DIR` or `CCP_PROFILE` manually always wins
+- `ccp allow --status` — see the current state of the marker at `$PWD`
+
 ## Relationship to jean-claude
 
 `ccp` is a ground-up rewrite in Go inspired by [`MikeVeerman/jean-claude`](https://github.com/MikeVeerman/jean-claude), which pioneered the `CLAUDE_CONFIG_DIR` + shared-config-overlay approach.
@@ -154,15 +202,36 @@ Your default `~/.claude/` is never touched. Remove the `shell-init` line from yo
 | Doctor / rollback | — | ✓ |
 | Content-level directory diff | Directory-existence only | Per-file SHA-256 |
 | Completions | — | bash, zsh, fish |
-| Secrets separation | — | Planned (v2, keychain + `op://`) |
-| Auto-activation | — | Planned (v2, direnv-style allow-list) |
+| Secrets separation | — | ✓ (v2, keychain + `op://` + file fallback) |
+| Auto-activation | — | ✓ (v2, direnv-style allow-list) |
 | Windows | Unsupported | Planned (v2.1) |
 
 ## Roadmap
 
-- **v2.0** — Auto-activation via `.claude-profile` marker and direnv-style content-hash allow-list. Secrets separation (`secrets/<name>.json`, keychain + `op://` reference resolution).
+- **v2.0** — Shipping: auto-activation via `.claude-profile` marker + content-hash allow-list, secrets separation with OS keychain + `op://` reference resolution.
 - **v2.1** — Windows (PowerShell integration, copy mode in place of POSIX symlinks).
 - **v3.x** — Profile plugins, team profile import from Git URL with safe update flow.
+
+## Gotchas
+
+- **Headless Linux and devcontainers**: no OS keychain backend is available by default. `ccp secret set` will write to `~/.config/ccp/secrets/<profile>.json` (0600, gitignored) and print a one-time warning. Install `libsecret` / `gnome-keyring` for keychain-backed storage.
+- **1Password CLI prompting**: `op://` refs may trigger biometric unlock on first use. In non-TTY contexts (CI, shell hooks), set `OP_SERVICE_ACCOUNT_TOKEN` or the ref will be refused with a clear error.
+- **Allow-list is per-machine**: `~/.config/ccp/allowlist.toml` is gitignored and deliberately not synced across machines. You must `ccp allow` once on each workstation. This is a deliberate tradeoff — see "Deviations from linked issues" below.
+- **Content-only marker hash**: the allow-list hashes only the contents of `.claude-profile`, not the path. Moving or renaming a file with identical contents does NOT require re-approval; editing its content DOES. This preserves sync-across-machines at a small supply-chain cost documented in the plan.
+- **Shell hook latency**: cache hit is <5ms (pure shell); cache miss forks `ccp` and typically takes 30-80ms cold. `CCP_PROFILE_AUTO=0` turns the whole layer off.
+- **`{{` collision**: ccp only treats `{{` as a ref when it matches one of three schemes (`keychain:`, `op://`, `env.`). Other `{{ ... }}` content (Helm, Handlebars, prose) passes through untouched. Use `{{!}}` to force literal output.
+- **Executable bit preservation**: rendered files preserve the user-execute bit from the source — so a ref-bearing 0755 hook script lands as 0700 in the runtime dir, not 0600.
+
+## Deviations from linked issues (#4, #5)
+
+During implementation, a few design decisions diverged from the original issues:
+
+- **Allow-list is `allowlist.toml` not `allowed.json`** — matches existing ccp manifest conventions.
+- **Hash is content-only, not path+content** — direnv's path-in-hash breaks ccp's sync-across-machines tagline. Threat model: the marker content is just a validated profile name, and the attack surface (the profile's hooks) requires the profile to already exist locally.
+- **Reference syntax is profile-implicit**: `{{ keychain:KEY }}` (not `{{ keychain://ccp/<profile>/<key> }}`) — refs transport cleanly across profile renames and copies.
+- **Export audit is advisory by default**; `--fail-on-audit` opts into refusing export on findings.
+- **`ccp exec` refreshes symlinks only when the profile contains refs** (`refs.HasAnyRefs` short-circuit); `--no-refresh` flag skips even when refs exist.
+- **Windows commands are unregistered**, not runtime-errored — the commands simply don't appear in `ccp --help` under Windows. Windows backend work is tracked in issue #6.
 
 ## License
 

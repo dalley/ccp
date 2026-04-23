@@ -52,7 +52,9 @@ const GitignoreContents = `# ccp-managed. Do not remove the entries below.
 /manifest.toml
 /backups/
 /lock
+/allowlist.toml
 /secrets/
+/runtime-manifest/
 .DS_Store
 `
 
