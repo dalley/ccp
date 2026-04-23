@@ -27,7 +27,7 @@ Download the archive for your platform from the [releases page](https://github.c
 ### npm
 
 ```sh
-npm install -g ccp-cli
+npm install -g @dalley/ccp
 ```
 
 The npm package downloads the platform binary in a `postinstall` hook; Node is not required at runtime.

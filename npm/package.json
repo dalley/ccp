@@ -1,6 +1,6 @@
 {
-  "name": "ccp-cli",
-  "version": "0.1.0",
+  "name": "@dalley/ccp",
+  "version": "0.1.1",
   "description": "Manage multiple Claude Code profiles on one machine (native binary, installed via npm)",
   "bin": {
     "ccp": "bin/ccp"
@@ -21,6 +21,9 @@
   "homepage": "https://github.com/dalley/ccp#readme",
   "bugs": "https://github.com/dalley/ccp/issues",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=14"
   }

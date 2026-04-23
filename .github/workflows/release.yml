@@ -26,6 +26,32 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Homebrew tap PAT needs repo write; configure once and store as
-          # HOMEBREW_TAP_TOKEN in repo secrets, then uncomment:
-          # HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Homebrew tap publication is skipped at goreleaser-config time
+          # when this secret is absent; un-skip by adding a PAT (scoped to
+          # dalley/homebrew-ccp, contents read/write) to repo secrets.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  npm:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    # Skip when NPM_TOKEN isn't configured so the whole release doesn't
+    # fail over a missing secret. Repo owners set this as an npm
+    # automation token with publish scope on @dalley/ccp.
+    if: ${{ vars.NPM_PUBLISH == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Set package version from tag
+        working-directory: npm
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Publishing npm package version $TAG"
+          npm version --no-git-tag-version --allow-same-version "$TAG"
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

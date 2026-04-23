@@ -53,23 +53,26 @@ changelog:
       - "^test:"
       - "^chore:"
 
-# Homebrew formula publication is gated on the dalley/homebrew-ccp tap
-# existing and HOMEBREW_TAP_TOKEN being set in repo secrets. Until then,
-# releases produce archives + checksums only. Re-enable by uncommenting:
-# brews:
-#   - name: ccp
-#     repository:
-#       owner: dalley
-#       name: homebrew-ccp
-#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-#     homepage: "https://github.com/dalley/ccp"
-#     description: "Manage multiple Claude Code profiles on one machine"
-#     license: "MIT"
-#     install: |
-#       bin.install "ccp"
-#       generate_completions_from_executable(bin/"ccp", "completion")
-#     test: |
-#       system "#{bin}/ccp version"
+brews:
+  - name: ccp
+    # Skip publication when the tap token isn't configured, so a first
+    # release can ship archives without the whole pipeline failing over
+    # a missing secret. Un-skip by adding HOMEBREW_TAP_TOKEN to repo
+    # secrets (fine-grained PAT scoped to dalley/homebrew-ccp, contents
+    # read/write).
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ else }}false{{ end }}'
+    repository:
+      owner: dalley
+      name: homebrew-ccp
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/dalley/ccp"
+    description: "Manage multiple Claude Code profiles on one machine"
+    license: "MIT"
+    install: |
+      bin.install "ccp"
+      generate_completions_from_executable(bin/"ccp", "completion")
+    test: |
+      system "#{bin}/ccp version"
 
 release:
   github:
