@@ -6,6 +6,7 @@
 package sync
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,21 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 )
+
+// NetworkTimeout is the ceiling for any single remote operation. It balances
+// tolerating slow networks against letting a wedged remote pin ccp forever.
+// Override per-call via the CCP_NETWORK_TIMEOUT env var (Go duration format).
+const NetworkTimeout = 60 * time.Second
+
+func networkCtx() (context.Context, context.CancelFunc) {
+	d := NetworkTimeout
+	if v := os.Getenv("CCP_NETWORK_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+			d = parsed
+		}
+	}
+	return context.WithTimeout(context.Background(), d)
+}
 
 // SyncMarkerFilename is a small JSON file at the root of a ccp sync repo
 // that identifies it as a ccp-managed repo. `sync setup` checks for it when
@@ -238,7 +254,9 @@ func Push(configDir string) error {
 	if err != nil {
 		return err
 	}
-	return repo.Push(&git.PushOptions{
+	ctx, cancel := networkCtx()
+	defer cancel()
+	return repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: "origin",
 		Auth:       sshAuthFromEnv(),
 	})
@@ -299,7 +317,9 @@ func Pull(configDir string, opts PullOptions) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	err = w.Pull(&git.PullOptions{
+	ctx, cancel := networkCtx()
+	defer cancel()
+	err = w.PullContext(ctx, &git.PullOptions{
 		RemoteName: "origin",
 		Auth:       sshAuthFromEnv(),
 	})
@@ -413,7 +433,9 @@ func CloneOrOpen(configDir, remoteURL string) error {
 	}
 	defer os.RemoveAll(tmp)
 
-	_, err = git.PlainClone(tmp, false, &git.CloneOptions{
+	ctx, cancel := networkCtx()
+	defer cancel()
+	_, err = git.PlainCloneContext(ctx, tmp, false, &git.CloneOptions{
 		URL:  remoteURL,
 		Auth: sshAuthFromEnv(),
 	})

@@ -19,7 +19,7 @@ func newProfileRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			err = withLock(s.Paths, func() error {
+			err = withLockedState(s.Paths, func(s *state) error {
 				if ierr := profile.Rename(s.Paths, oldName, newName); ierr != nil {
 					return ierr
 				}
@@ -34,9 +34,6 @@ func newProfileRenameCmd() *cobra.Command {
 				}
 				if s.Manifest.ActiveProfile == oldName {
 					s.Manifest.ActiveProfile = newName
-					if ierr := saveManifest(s); ierr != nil {
-						return ierr
-					}
 				}
 				return nil
 			})

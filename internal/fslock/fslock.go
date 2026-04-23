@@ -11,9 +11,25 @@ package fslock
 import (
 	"fmt"
 	"os"
+	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// DefaultTimeout is the ceiling Acquire waits before returning
+// ErrLockContended. It is short enough that a hung ccp process (e.g. a
+// blocked `sync pull`) cannot silently pin every future invocation, but
+// long enough that normal back-to-back commands are never bothered.
+const DefaultTimeout = 30 * time.Second
+
+// ErrLockContended is returned when Acquire's deadline elapses without
+// getting the lock. Callers use errors.Is to surface a retry hint.
+type ErrLockContended struct{ Path string }
+
+func (e *ErrLockContended) Error() string {
+	return fmt.Sprintf("another ccp process is holding %s; wait or kill it and retry", e.Path)
+}
 
 // Lock represents an acquired advisory lock.
 type Lock struct {
@@ -21,17 +37,40 @@ type Lock struct {
 }
 
 // Acquire takes an exclusive lock on path, creating the file if necessary.
-// It blocks until the lock is available. Call Release() when done.
+// It retries with LOCK_NB until DefaultTimeout elapses. Use AcquireWithTimeout
+// to pick a different deadline.
 func Acquire(path string) (*Lock, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	return AcquireWithTimeout(path, DefaultTimeout)
+}
+
+// AcquireWithTimeout is Acquire with an explicit deadline. A non-positive
+// timeout falls back to a single LOCK_NB attempt (non-blocking).
+func AcquireWithTimeout(path string, timeout time.Duration) (*Lock, error) {
+	// O_CLOEXEC prevents child processes spawned by `ccp exec` from
+	// inheriting the lock FD and keeping it held after ccp itself exits.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_CLOEXEC, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %s: %w", path, err)
 	}
-	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("flock %s: %w", path, err)
+
+	deadline := time.Now().Add(timeout)
+	first := true
+	for {
+		err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return &Lock{f: f}, nil
+		}
+		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
+			_ = f.Close()
+			return nil, fmt.Errorf("flock %s: %w", path, err)
+		}
+		if timeout <= 0 || (!first && time.Now().After(deadline)) {
+			_ = f.Close()
+			return nil, &ErrLockContended{Path: path}
+		}
+		first = false
+		time.Sleep(100 * time.Millisecond)
 	}
-	return &Lock{f: f}, nil
 }
 
 // Release unlocks and closes the lock file.

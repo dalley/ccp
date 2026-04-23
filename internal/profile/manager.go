@@ -82,6 +82,10 @@ func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 // seedFromCurrent copies every SharedItems entry present in ~/.claude/ into
 // pr.SourceDir. Skips missing items silently — a user who has never created a
 // keybindings.json gets an empty slot, not an error.
+//
+// Symlinks at the top of ~/.claude/ are only accepted when their target
+// stays within ~/.claude/. A user whose settings.json → /etc/hosts would
+// otherwise silently get /etc/hosts's content baked into the new profile.
 func seedFromCurrent(p paths.Paths, pr Profile) error {
 	for _, item := range SharedItems {
 		src := filepath.Join(p.ClaudeHome, item.Name)
@@ -92,6 +96,20 @@ func seedFromCurrent(p paths.Paths, pr Profile) error {
 				continue
 			}
 			return fmt.Errorf("stat %s: %w", src, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(src)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", src, err)
+			}
+			if !symlinkWithin(src, link, p.ClaudeHome) {
+				return fmt.Errorf("refusing to seed from symlink %s → %s: target escapes ~/.claude", src, link)
+			}
+			// Resolve the symlink and use its real FileInfo for dispatch.
+			info, err = os.Stat(src)
+			if err != nil {
+				return fmt.Errorf("stat symlink target %s: %w", src, err)
+			}
 		}
 		if info.IsDir() {
 			if err := copyTree(src, dst); err != nil {
@@ -124,17 +142,36 @@ func Delete(p paths.Paths, name string, backupDir string) (string, error) {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 
-	// Move source dir into the backup so delete is reversible.
 	srcBackup := filepath.Join(backupDir, "profiles-"+name)
+	runtimeBackup := filepath.Join(backupDir, "claude-"+name)
+
+	// Pre-check both backup destinations so we fail before mutating
+	// anything if either target already exists.
+	if _, err := os.Lstat(srcBackup); err == nil {
+		return "", fmt.Errorf("backup destination %s already exists", srcBackup)
+	}
+	runtimeExists := false
+	if _, err := os.Stat(pr.ConfigDir); err == nil {
+		runtimeExists = true
+		if _, err := os.Lstat(runtimeBackup); err == nil {
+			return "", fmt.Errorf("backup destination %s already exists", runtimeBackup)
+		}
+	}
+
+	// Move source dir into the backup so delete is reversible.
 	if err := os.Rename(pr.SourceDir, srcBackup); err != nil {
 		return "", fmt.Errorf("backup source: %w", err)
 	}
 
 	// Move runtime dir (if it exists) into the backup as well. Whole-dir
 	// rename captures auth tokens/sessions/caches along for the ride.
-	if _, err := os.Stat(pr.ConfigDir); err == nil {
-		runtimeBackup := filepath.Join(backupDir, "claude-"+name)
+	// On failure of this second move we roll back the first so the profile
+	// is never left in a half-deleted state.
+	if runtimeExists {
 		if err := os.Rename(pr.ConfigDir, runtimeBackup); err != nil {
+			if rerr := os.Rename(srcBackup, pr.SourceDir); rerr != nil {
+				return "", fmt.Errorf("backup runtime failed (%v) and source rollback also failed: %w", err, rerr)
+			}
 			return "", fmt.Errorf("backup runtime: %w", err)
 		}
 	}
@@ -159,12 +196,23 @@ func Rename(p paths.Paths, oldName, newName string) error {
 	if dst.Exists() {
 		return fmt.Errorf("%w: %s", ErrAlreadyExists, newName)
 	}
+	// Pre-check the runtime destination too; otherwise a stale
+	// ~/.claude-<new> (orphaned from a prior failed Delete) would let
+	// the source rename succeed and then fail halfway.
+	if _, err := os.Lstat(dst.ConfigDir); err == nil {
+		return fmt.Errorf("runtime dir %s already exists; remove it or pick a different name", dst.ConfigDir)
+	}
 
 	if err := os.Rename(src.SourceDir, dst.SourceDir); err != nil {
 		return fmt.Errorf("rename source: %w", err)
 	}
 	if _, err := os.Stat(src.ConfigDir); err == nil {
 		if err := os.Rename(src.ConfigDir, dst.ConfigDir); err != nil {
+			// Roll back the source rename so the profile is recoverable
+			// under its old name.
+			if rerr := os.Rename(dst.SourceDir, src.SourceDir); rerr != nil {
+				return fmt.Errorf("rename runtime failed (%v) and source rollback also failed: %w", err, rerr)
+			}
 			return fmt.Errorf("rename runtime: %w", err)
 		}
 	}

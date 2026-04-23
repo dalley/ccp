@@ -42,6 +42,11 @@ local changes.`,
 					BackupDir: bk,
 				})
 				if err != nil {
+					// Do NOT run Prune here. If the failure left a partial
+					// backup in place, Prune could (under clock skew or
+					// high retention turnover) delete the only copy of
+					// the pre-pull tree — and a retry after the user frees
+					// disk would then hard-reset with no recovery path.
 					return err
 				}
 				out := cmd.OutOrStdout()

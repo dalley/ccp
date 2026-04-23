@@ -15,19 +15,19 @@ func newProfileUseCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			if err := profile.ValidateName(name); err != nil {
+				return err
+			}
 			s, err := loadState()
 			if err != nil {
 				return err
 			}
-			pr, err := profile.NewChecked(s.Paths, name)
-			if err != nil {
-				return err
-			}
-			if !pr.Exists() {
-				return fmt.Errorf("profile %q not found (create it with: ccp profile create %s)", name, name)
-			}
+			pr := profile.New(s.Paths, name)
 
 			if shellOnly {
+				if !pr.Exists() {
+					return fmt.Errorf("profile %q not found", name)
+				}
 				// Emit a line the caller can eval to set env for the current
 				// shell — same idiom as `ssh-agent -s` or `nvm use` returning
 				// a function call.
@@ -36,9 +36,15 @@ func newProfileUseCmd() *cobra.Command {
 				return nil
 			}
 
-			err = withLock(s.Paths, func() error {
+			err = withLockedState(s.Paths, func(s *state) error {
+				// Re-check existence under the lock: a concurrent delete
+				// could have removed the profile between loadState and
+				// lock acquisition.
+				if !profile.New(s.Paths, name).Exists() {
+					return fmt.Errorf("profile %q not found (create it with: ccp profile create %s)", name, name)
+				}
 				s.Manifest.ActiveProfile = name
-				return saveManifest(s)
+				return nil
 			})
 			if err != nil {
 				return err

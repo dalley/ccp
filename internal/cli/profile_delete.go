@@ -48,7 +48,7 @@ func newProfileDeleteCmd() *cobra.Command {
 			}
 
 			var bkDir string
-			err = withLock(s.Paths, func() error {
+			err = withLockedState(s.Paths, func(s *state) error {
 				dir, ierr := backup.New(s.Paths.BackupsDir, "pre-delete-"+name)
 				if ierr != nil {
 					return ierr
@@ -65,9 +65,6 @@ func newProfileDeleteCmd() *cobra.Command {
 
 				if s.Manifest.ActiveProfile == name {
 					s.Manifest.ActiveProfile = ""
-					if ierr := saveManifest(s); ierr != nil {
-						return ierr
-					}
 				}
 				return backup.Prune(s.Paths.BackupsDir, backup.DefaultRetention)
 			})
