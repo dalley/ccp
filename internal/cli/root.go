@@ -23,6 +23,7 @@ func NewRoot() *cobra.Command {
 	// word "profile" is redundant on the hot path.
 	root.AddCommand(newProfileUseCmd())
 	root.AddCommand(newExecCmd())
+	root.AddCommand(newSyncCmd())
 
 	return root
 }
