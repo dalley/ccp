@@ -24,6 +24,21 @@ func TestNewCreatesTimestampedDir(t *testing.T) {
 	}
 }
 
+func TestNewReturnsUniqueDirsWithinSameSecond(t *testing.T) {
+	base := t.TempDir()
+	seen := map[string]struct{}{}
+	for i := 0; i < 10; i++ {
+		dir, err := New(base, "op")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, dup := seen[dir]; dup {
+			t.Fatalf("collision on iteration %d: %s", i, dir)
+		}
+		seen[dir] = struct{}{}
+	}
+}
+
 func TestPruneKeepsNewest(t *testing.T) {
 	base := t.TempDir()
 	// Seed 5 backups with predictable names.

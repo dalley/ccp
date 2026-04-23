@@ -14,11 +14,11 @@ func newSyncPullCmd() *cobra.Command {
 		Use:   "pull",
 		Short: "Fetch and merge changes from origin (non-destructive by default)",
 		Long: `Pull fetches and merges changes from origin. Non-destructive by default:
-if the working tree has uncommitted changes, it refuses and asks you to
-either push them first or re-run with --force.
+if the working tree has uncommitted changes, it returns exit 4 (conflict)
+and asks you to either push them first or re-run with --force.
 
 --force backs up profiles/ into ~/.config/ccp/backups/ before discarding
-local changes.`,
+local changes. An unreachable remote returns exit 3 (network).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := loadState()
 			if err != nil {

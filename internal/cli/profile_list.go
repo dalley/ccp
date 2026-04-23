@@ -46,21 +46,37 @@ func newProfileListCmd() *cobra.Command {
 }
 
 func newCurrentCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "current",
-		Short: "Print the active profile name",
+		Short: "Print the active profile name (empty when no profile is active)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := loadState()
 			if err != nil {
 				return err
 			}
-			if s.Manifest.ActiveProfile == "" {
+			active := s.Manifest.ActiveProfile
+			if asJSON {
+				type row struct {
+					Active *string `json:"active"`
+				}
+				var v row
+				if active != "" {
+					v.Active = &active
+				}
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(v)
+			}
+			if active == "" {
 				return nil
 			}
-			_, err = fmt.Fprintln(cmd.OutOrStdout(), s.Manifest.ActiveProfile)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), active)
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit {\"active\": null} or {\"active\": <name>}")
+	return cmd
 }
 
 func emitListJSON(cmd *cobra.Command, profiles []profile.Profile, active string) error {

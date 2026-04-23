@@ -7,6 +7,8 @@
 package backup
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,14 +22,32 @@ const DefaultRetention = 10
 
 // New creates a fresh backup directory tagged with op (e.g. "pre-delete-work")
 // and returns its path. Caller populates it.
+//
+// Directory names include a 4-byte random suffix so rapid back-to-back
+// backups within the same second cannot collide. Without the suffix, two
+// `ccp profile delete` calls from a script run within 1s would MkdirAll
+// the same directory and scramble each other's contents.
 func New(baseDir, op string) (string, error) {
 	ts := time.Now().UTC().Format("2006-01-02T15-04-05")
-	name := ts + "_" + sanitize(op)
+	name := ts + "_" + sanitize(op) + "_" + randomSuffix()
 	dir := filepath.Join(baseDir, name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.Mkdir(filepath.Dir(dir), 0o755); err != nil && !os.IsExist(err) {
+		return "", fmt.Errorf("create backups dir: %w", err)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 	return dir, nil
+}
+
+func randomSuffix() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fall back to nanoseconds — still collision-resistant within a
+		// single process for any plausible call rate.
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xFFFFFFFF)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Prune deletes all but the most recent `keep` backups in baseDir.

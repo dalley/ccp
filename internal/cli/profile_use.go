@@ -10,9 +10,10 @@ import (
 func newProfileUseCmd() *cobra.Command {
 	var shellOnly bool
 	cmd := &cobra.Command{
-		Use:   "use <name>",
-		Short: "Set the active profile",
-		Args:  cobra.ExactArgs(1),
+		Use:               "use <name>",
+		Short:             "Set the active profile",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if err := profile.ValidateName(name); err != nil {

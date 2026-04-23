@@ -14,12 +14,13 @@ import (
 // DiffEntry is one file or directory difference between two profiles.
 type DiffEntry struct {
 	// Path is relative to the profile source directory.
-	Path string
+	Path string `json:"path"`
 	// Kind describes the difference.
-	Kind DiffKind
+	Kind DiffKind `json:"kind"`
 	// HashA / HashB are SHA-256 hex digests; empty when the file is missing
 	// on that side.
-	HashA, HashB string
+	HashA string `json:"hash_a,omitempty"`
+	HashB string `json:"hash_b,omitempty"`
 }
 
 // DiffKind classifies a DiffEntry.

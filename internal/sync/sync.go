@@ -8,6 +8,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -256,10 +257,13 @@ func Push(configDir string) error {
 	}
 	ctx, cancel := networkCtx()
 	defer cancel()
-	return repo.PushContext(ctx, &git.PushOptions{
+	if err := repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: "origin",
 		Auth:       sshAuthFromEnv(),
-	})
+	}); err != nil {
+		return wrapNetwork(err)
+	}
+	return nil
 }
 
 // IsDirty reports whether the working tree has uncommitted changes.
@@ -298,8 +302,7 @@ func Pull(configDir string, opts PullOptions) (bool, error) {
 	}
 	if dirty {
 		if !opts.Force {
-			return false, fmt.Errorf("working tree has uncommitted changes; " +
-				"commit them (ccp sync push), or re-run with --force to discard")
+			return false, ErrDirtyWorkingTree
 		}
 		if err := backupProfilesDir(configDir, opts.BackupDir); err != nil {
 			return false, fmt.Errorf("pre-pull backup: %w", err)
@@ -329,8 +332,25 @@ func Pull(configDir string, opts PullOptions) (bool, error) {
 	case err == git.NoErrAlreadyUpToDate:
 		return false, nil
 	default:
-		return false, err
+		return false, wrapNetwork(err)
 	}
+}
+
+// wrapNetwork decorates network-class errors from go-git with
+// ErrRemoteUnreachable so the CLI maps them to ExitNetwork. Leaves other
+// errors (auth, protocol, disk) alone — auth failures are user-class.
+func wrapNetwork(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	netHints := []string{"no such host", "connection refused", "timeout", "i/o timeout", "unreachable", "context deadline"}
+	for _, h := range netHints {
+		if strings.Contains(msg, h) {
+			return fmt.Errorf("%w: %v", ErrRemoteUnreachable, err)
+		}
+	}
+	return err
 }
 
 // backupProfilesDir copies profiles/ into backupDir (retained by the caller's
@@ -355,6 +375,12 @@ func hardReset(configDir string) error {
 	}
 	head, err := repo.Head()
 	if err != nil {
+		// A freshly-initialized repo with zero commits has no HEAD. There
+		// is nothing to reset TO; surface a clear message instead of the
+		// raw go-git sentinel.
+		if errors.Is(err, plumbing.ErrReferenceNotFound) {
+			return fmt.Errorf("repo has no commits yet; nothing to reset")
+		}
 		return err
 	}
 	return w.Reset(&git.ResetOptions{Mode: git.HardReset, Commit: head.Hash()})
@@ -362,12 +388,21 @@ func hardReset(configDir string) error {
 
 // StatusSummary is what `ccp sync status` reports.
 type StatusSummary struct {
-	Remote        string
-	RepoExists    bool
-	Dirty         bool
-	ChangedFiles  []string
-	CurrentBranch string
-	AheadBehind   string // human text like "up to date" or "N ahead, M behind"
+	Remote        string   `json:"remote"`
+	RepoExists    bool     `json:"repo_exists"`
+	Dirty         bool     `json:"dirty"`
+	ChangedFiles  []string `json:"changed_files"`
+	CurrentBranch string   `json:"current_branch,omitempty"`
+	// Ahead / Behind commit counts against origin/<branch>. Populated only
+	// when --fetch was passed; zero values when the caller didn't request a
+	// network refresh.
+	Ahead   int  `json:"ahead"`
+	Behind  int  `json:"behind"`
+	Fetched bool `json:"fetched"`
+	// FetchError carries a non-fatal network error message when --fetch was
+	// requested but the fetch itself failed. The rest of the struct still
+	// reflects local state.
+	FetchError string `json:"fetch_error,omitempty"`
 }
 
 // Status reads the current repo state.
@@ -406,16 +441,129 @@ func Status(configDir string) (StatusSummary, error) {
 	// Go map iteration is random; sort so repeated `sync status` calls
 	// produce byte-identical output that agents can safely diff.
 	sort.Strings(out.ChangedFiles)
-	// We don't compute ahead/behind here — it requires a fetch, which may
-	// hang on network failure. Leaving AheadBehind as informational text.
-	out.AheadBehind = "run `git -C " + configDir + " status -sb` for ahead/behind"
 	return out, nil
 }
 
-// ErrRemoteEmpty is returned by CloneOrOpen when the remote has no commits
-// yet. The caller should fall through to InitRepo + SetRemote: this is the
-// expected state the first time a user runs `sync setup --url <new repo>`.
-var ErrRemoteEmpty = fmt.Errorf("remote repository is empty")
+// StatusWithFetch returns the same summary as Status plus ahead/behind
+// counts relative to origin/<branch>. The fetch is bounded by timeout;
+// network failures populate FetchError but do not fail the whole call.
+func StatusWithFetch(configDir string, timeout time.Duration) (StatusSummary, error) {
+	out, err := Status(configDir)
+	if err != nil || !out.RepoExists {
+		return out, err
+	}
+
+	repo, err := git.PlainOpen(configDir)
+	if err != nil {
+		return out, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	fetchErr := repo.FetchContext(ctx, &git.FetchOptions{
+		RemoteName: "origin",
+		Auth:       sshAuthFromEnv(),
+	})
+	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
+		out.FetchError = fetchErr.Error()
+		return out, nil
+	}
+	out.Fetched = true
+
+	if out.CurrentBranch == "" {
+		return out, nil
+	}
+	head, err := repo.Head()
+	if err != nil {
+		out.FetchError = err.Error()
+		return out, nil
+	}
+	remoteRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", out.CurrentBranch), true)
+	if err != nil {
+		out.FetchError = err.Error()
+		return out, nil
+	}
+	ahead, behind, err := countAheadBehind(repo, head.Hash(), remoteRef.Hash())
+	if err != nil {
+		out.FetchError = err.Error()
+		return out, nil
+	}
+	out.Ahead = ahead
+	out.Behind = behind
+	return out, nil
+}
+
+// countAheadBehind walks commits reachable from local that are not
+// reachable from remote (ahead) and vice versa (behind). Cheap for the
+// tiny commit counts we expect in a profile-sync repo.
+func countAheadBehind(repo *git.Repository, local, remote plumbing.Hash) (ahead, behind int, err error) {
+	ahead, err = countExcluding(repo, local, remote)
+	if err != nil {
+		return 0, 0, err
+	}
+	behind, err = countExcluding(repo, remote, local)
+	return ahead, behind, err
+}
+
+func countExcluding(repo *git.Repository, head, exclude plumbing.Hash) (int, error) {
+	// Build the set of ancestors of exclude so we can prune them while
+	// walking head. For small histories (profile repos), the full ancestor
+	// set fits comfortably in memory.
+	seen := map[plumbing.Hash]struct{}{}
+	if err := walkAncestors(repo, exclude, seen); err != nil {
+		return 0, err
+	}
+	iter, err := repo.Log(&git.LogOptions{From: head})
+	if err != nil {
+		return 0, err
+	}
+	defer iter.Close()
+	n := 0
+	for {
+		c, err := iter.Next()
+		if err != nil {
+			break
+		}
+		if _, stop := seen[c.Hash]; stop {
+			break
+		}
+		n++
+	}
+	return n, nil
+}
+
+func walkAncestors(repo *git.Repository, start plumbing.Hash, out map[plumbing.Hash]struct{}) error {
+	iter, err := repo.Log(&git.LogOptions{From: start})
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+	for {
+		c, err := iter.Next()
+		if err != nil {
+			return nil
+		}
+		out[c.Hash] = struct{}{}
+	}
+}
+
+// Sentinel errors surfaced to the CLI layer for exit-code mapping.
+var (
+	// ErrRemoteEmpty is returned by CloneOrOpen when the remote has no
+	// commits yet. The caller should fall through to InitRepo + SetRemote:
+	// this is the expected state the first time a user runs
+	// `sync setup --url <new repo>`.
+	ErrRemoteEmpty = errors.New("remote repository is empty")
+
+	// ErrDirtyWorkingTree is returned by Pull when the working tree has
+	// uncommitted changes and --force was not set.
+	ErrDirtyWorkingTree = errors.New("working tree has uncommitted changes; commit them (ccp sync push), or re-run with --force to discard")
+
+	// ErrRemoteUnreachable wraps network-origin errors from go-git so
+	// callers can map to a network-class exit code without matching on
+	// error strings.
+	ErrRemoteUnreachable = errors.New("remote unreachable")
+)
 
 // CloneOrOpen clones remote to configDir if it doesn't exist, otherwise opens.
 // The clone path is used by `sync setup --url <remote>` when the local
@@ -440,12 +588,17 @@ func CloneOrOpen(configDir, remoteURL string) error {
 		Auth: sshAuthFromEnv(),
 	})
 	if err != nil {
-		// Differentiate "remote empty" from other clone failures so the
-		// caller can decide to fall through to init.
-		if strings.Contains(err.Error(), "empty") || err == transport.ErrEmptyRemoteRepository {
+		// Differentiate "remote empty" from other clone failures. Prefer
+		// errors.Is on the known go-git sentinel — that's the contract.
+		// The string-contains fallback catches very old or forked go-git
+		// builds where the sentinel isn't returned.
+		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
 			return ErrRemoteEmpty
 		}
-		return fmt.Errorf("clone: %w", err)
+		if strings.Contains(err.Error(), "remote repository is empty") {
+			return ErrRemoteEmpty
+		}
+		return fmt.Errorf("clone: %w", wrapNetwork(err))
 	}
 
 	// Move cloned .git into configDir.

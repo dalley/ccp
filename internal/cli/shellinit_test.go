@@ -23,11 +23,14 @@ func TestShellInitPosixContainsMarkersAndGuard(t *testing.T) {
 		shellInitBegin, shellInitEnd,
 		`[ -n "$CLAUDE_CONFIG_DIR" ] && return 0`,
 		`export CLAUDE_CONFIG_DIR="$HOME/.claude-$profile"`,
-		`${XDG_CONFIG_HOME:-$HOME/.config}/ccp/manifest.toml`,
+		`ccp shell-active`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("snippet missing %q. full output:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "awk") {
+		t.Errorf("snippet still uses awk; should go via ccp shell-active:\n%s", out)
 	}
 }
 

@@ -46,6 +46,21 @@ func InstallAlias(shellrcPath, name string) error {
 	return os.WriteFile(shellrcPath, []byte(content), 0o644)
 }
 
+// AliasExists reports whether shellrcPath currently contains an alias block
+// for name. Used by commands that want to tell the user whether a removal
+// just happened so they can re-install the alias elsewhere.
+func AliasExists(shellrcPath, name string) bool {
+	content, err := readOrEmpty(shellrcPath)
+	if err != nil {
+		return false
+	}
+	re, err := blockRegex(name)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(content)
+}
+
 // UninstallAlias removes any alias block for name from shellrcPath. Missing
 // file or missing block is treated as success.
 func UninstallAlias(shellrcPath, name string) error {

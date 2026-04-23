@@ -13,14 +13,14 @@ import (
 type DoctorFinding struct {
 	// Profile is the name of the profile the finding relates to, or "" if
 	// the finding is global.
-	Profile string
+	Profile string `json:"profile,omitempty"`
 	// Severity is "warn" for recoverable issues and "error" for things that
 	// would break switching to this profile.
-	Severity string
+	Severity string `json:"severity"`
 	// Message is a human-readable description.
-	Message string
+	Message string `json:"message"`
 	// Hint is optional actionable guidance.
-	Hint string
+	Hint string `json:"hint,omitempty"`
 }
 
 // Doctor validates a profile's runtime directory against its source:

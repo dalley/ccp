@@ -1,7 +1,9 @@
 package sync
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -9,7 +11,13 @@ import (
 
 // sshAuthFromEnv builds an SSH auth method from the user's environment.
 // Currently: use the SSH agent if SSH_AUTH_SOCK is present, otherwise fall
-// back to ~/.ssh/id_ed25519 / id_rsa with a default password of "".
+// back to ~/.ssh/id_ed25519 / id_rsa with an empty passphrase.
+//
+// Encrypted keys cannot be loaded via the empty-passphrase path — we print
+// a warning and return nil so the caller attempts unauthenticated access,
+// which will fail loudly against a private remote. Preferable to silently
+// returning nil without explaining why the next command fails with
+// "authentication required".
 //
 // HTTPS URLs don't need this — go-git uses no auth for HTTPS by default,
 // which works for public repos and for hosts that supply a credential
@@ -25,6 +33,7 @@ func sshAuthFromEnv() transport.AuthMethod {
 	if err != nil {
 		return nil
 	}
+	encryptedSeen := false
 	for _, name := range []string{"id_ed25519", "id_rsa"} {
 		key := home + "/.ssh/" + name
 		if _, err := os.Stat(key); err != nil {
@@ -34,6 +43,14 @@ func sshAuthFromEnv() transport.AuthMethod {
 		if err == nil {
 			return auth
 		}
+		// Common cases: encrypted key (needs passphrase) or malformed key.
+		if strings.Contains(err.Error(), "passphrase") || strings.Contains(err.Error(), "encrypted") {
+			encryptedSeen = true
+		}
+	}
+	if encryptedSeen {
+		fmt.Fprintln(os.Stderr, "ccp: ~/.ssh/id_ed25519 or id_rsa appears to be passphrase-encrypted. "+
+			"Start ssh-agent and `ssh-add` your key, then re-run.")
 	}
 	return nil
 }

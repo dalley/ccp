@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/dalley/ccp/internal/profile"
@@ -8,10 +9,12 @@ import (
 )
 
 func newProfileDoctorCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "doctor [name]",
-		Short: "Validate profile integrity (all profiles, or just one)",
-		Args:  cobra.MaximumNArgs(1),
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:               "doctor [name]",
+		Short:             "Validate profile integrity (all profiles, or just one)",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := loadState()
 			if err != nil {
@@ -26,24 +29,38 @@ func newProfileDoctorCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			if len(findings) == 0 {
-				fmt.Fprintln(out, "All profiles healthy.")
-				return nil
-			}
 			errorsFound := 0
 			for _, f := range findings {
-				prefix := "[warn]"
 				if f.Severity == "error" {
-					prefix = "[error]"
 					errorsFound++
 				}
-				scope := f.Profile
-				if scope == "" {
-					scope = "(global)"
+			}
+
+			if asJSON {
+				if findings == nil {
+					findings = []profile.DoctorFinding{}
 				}
-				fmt.Fprintf(out, "%s %s: %s\n", prefix, scope, f.Message)
-				if f.Hint != "" {
-					fmt.Fprintf(out, "        hint: %s\n", f.Hint)
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(findings); err != nil {
+					return err
+				}
+			} else if len(findings) == 0 {
+				fmt.Fprintln(out, "All profiles healthy.")
+			} else {
+				for _, f := range findings {
+					prefix := "[warn]"
+					if f.Severity == "error" {
+						prefix = "[error]"
+					}
+					scope := f.Profile
+					if scope == "" {
+						scope = "(global)"
+					}
+					fmt.Fprintf(out, "%s %s: %s\n", prefix, scope, f.Message)
+					if f.Hint != "" {
+						fmt.Fprintf(out, "        hint: %s\n", f.Hint)
+					}
 				}
 			}
 			if errorsFound > 0 {
@@ -52,4 +69,6 @@ func newProfileDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON array of findings")
+	return cmd
 }

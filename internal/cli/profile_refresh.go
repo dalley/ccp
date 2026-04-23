@@ -15,7 +15,8 @@ func newProfileRefreshCmd() *cobra.Command {
 current state of the source tree. Use after manually editing files in
 ~/.config/ccp/profiles/<name>/ or after pulling new content via sync.
 With no argument, refreshes every profile.`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := loadState()
 			if err != nil {

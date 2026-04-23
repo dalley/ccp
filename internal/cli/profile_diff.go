@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/dalley/ccp/internal/profile"
@@ -8,10 +9,12 @@ import (
 )
 
 func newProfileDiffCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "diff <a> [b]",
-		Short: "Diff two profiles (defaults b = active profile)",
-		Args:  cobra.RangeArgs(1, 2),
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:               "diff <a> [b]",
+		Short:             "Diff two profiles (defaults b = active profile)",
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := loadState()
 			if err != nil {
@@ -36,10 +39,10 @@ func newProfileDiffCmd() *cobra.Command {
 				return err
 			}
 			if !a.Exists() {
-				return fmt.Errorf("profile %q not found", aName)
+				return fmt.Errorf("%w: %s", profile.ErrNotFound, aName)
 			}
 			if !b.Exists() {
-				return fmt.Errorf("profile %q not found", bName)
+				return fmt.Errorf("%w: %s", profile.ErrNotFound, bName)
 			}
 
 			entries, err := profile.Diff(a, b)
@@ -47,6 +50,14 @@ func newProfileDiffCmd() *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				if entries == nil {
+					entries = []profile.DiffEntry{}
+				}
+				return enc.Encode(entries)
+			}
 			if len(entries) == 0 {
 				fmt.Fprintf(out, "%s and %s are identical\n", aName, bName)
 				return nil
@@ -64,4 +75,6 @@ func newProfileDiffCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON array of diff entries")
+	return cmd
 }

@@ -16,9 +16,10 @@ import (
 func newProfileDeleteCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a profile (source + runtime moved to backup)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "delete <name>",
+		Short:             "Delete a profile (source + runtime moved to backup)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			s, err := loadState()

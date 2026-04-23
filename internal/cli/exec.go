@@ -25,6 +25,14 @@ Examples:
 `,
 		Args:               cobra.MinimumNArgs(2),
 		DisableFlagParsing: true, // forward every flag unchanged to the child process.
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			// exec only completes the profile name in the first position;
+			// after that the child's own completion (if any) takes over.
+			if len(args) == 0 {
+				return completeProfileName(cmd, args, toComplete)
+			}
+			return nil, cobra.ShellCompDirectiveDefault
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Cobra strips a bare "--" from args when DisableFlagParsing is
 			// true, but positional ordering is preserved.

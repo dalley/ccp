@@ -62,19 +62,18 @@ func writeShellInit(w io.Writer, shell string, p paths.Paths) error {
 // CCP_PROFILE is set (per-shell override). The snippet uses $HOME so it is
 // portable across machines with different usernames.
 //
-// The profile value is re-validated against ccp's name regex before being
-// interpolated into CLAUDE_CONFIG_DIR. Without this check, a tampered manifest
-// with an active_profile containing backticks or $() would execute arbitrary
-// shell code when the user's shell sourced the shellrc.
+// Delegates TOML parsing to `ccp shell-active` instead of awk so schema
+// evolution in manifest.toml (comments, multi-line values, BOMs) can't
+// silently break activation. The name is also re-validated inline as a
+// defence-in-depth against any future bug in shell-active's output.
 func writePosix(w io.Writer, _ paths.Paths) {
 	fmt.Fprint(w, `__ccp_activate() {
   [ -n "$CLAUDE_CONFIG_DIR" ] && return 0
-  local manifest="${XDG_CONFIG_HOME:-$HOME/.config}/ccp/manifest.toml"
   local profile=""
   if [ -n "$CCP_PROFILE" ]; then
     profile="$CCP_PROFILE"
-  elif [ -r "$manifest" ]; then
-    profile="$(awk -F' *= *' '/^active_profile/ { gsub(/"/, "", $2); print $2; exit }' "$manifest" 2>/dev/null)"
+  elif command -v ccp >/dev/null 2>&1; then
+    profile="$(ccp shell-active 2>/dev/null)"
   fi
   case "$profile" in
     ''|*[!a-z0-9_-]*|[!a-z]*) return 0 ;;
@@ -90,20 +89,13 @@ func writeFish(w io.Writer, _ paths.Paths) {
   if set -q CLAUDE_CONFIG_DIR
     return 0
   end
-  set -l xdg $XDG_CONFIG_HOME
-  if test -z "$xdg"
-    set xdg "$HOME/.config"
-  end
-  set -l manifest "$xdg/ccp/manifest.toml"
   set -l profile ""
   if set -q CCP_PROFILE
     set profile $CCP_PROFILE
-  else if test -r $manifest
-    set profile (awk -F' *= *' '/^active_profile/ { gsub(/"/, "", $2); print $2; exit }' $manifest 2>/dev/null)
+  else if command -q ccp
+    set profile (ccp shell-active 2>/dev/null)
   end
-  # Re-validate the name before interpolating. Rejects anything that would
-  # let a tampered manifest smuggle shell metacharacters through to the
-  # export.
+  # Re-validate inline as defence in depth.
   if not string match -rq '^[a-z][a-z0-9_-]*$' -- "$profile"
     return 0
   end

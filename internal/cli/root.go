@@ -17,6 +17,7 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newShellInitCmd())
+	root.AddCommand(newShellActiveCmd())
 	root.AddCommand(newProfileCmd())
 	root.AddCommand(newCurrentCmd())
 	// `ccp use <name>` is a shortcut for `ccp profile use <name>` — the
