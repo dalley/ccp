@@ -22,6 +22,7 @@ func NewRoot() *cobra.Command {
 	// `ccp use <name>` is a shortcut for `ccp profile use <name>` — the
 	// word "profile" is redundant on the hot path.
 	root.AddCommand(newProfileUseCmd())
+	root.AddCommand(newExecCmd())
 
 	return root
 }

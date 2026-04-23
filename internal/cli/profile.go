@@ -13,5 +13,9 @@ func newProfileCmd() *cobra.Command {
 	cmd.AddCommand(newProfileUseCmd())
 	cmd.AddCommand(newProfileDeleteCmd())
 	cmd.AddCommand(newProfileRenameCmd())
+	cmd.AddCommand(newProfileDiffCmd())
+	cmd.AddCommand(newProfileDoctorCmd())
+	cmd.AddCommand(newProfileRollbackCmd())
+	cmd.AddCommand(newProfileRefreshCmd())
 	return cmd
 }
