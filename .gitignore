@@ -4,3 +4,5 @@
 *.test
 *.out
 .DS_Store
+# Per-run review + work artifacts from the compound-engineering skill suite.
+/.context/
