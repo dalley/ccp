@@ -139,3 +139,93 @@ func TestExecSetsClaudeConfigDirForChildProcess(t *testing.T) {
 		t.Errorf("child didn't see CLAUDE_CONFIG_DIR=%q\nout: %s", want, out)
 	}
 }
+
+// TestExecResolvesKeychainRefsEndToEnd is the integration test that
+// closes the loop: a profile with a keychain ref in settings.json; exec
+// triggers a refresh; child process cats the rendered content and sees
+// the resolved value, not the `{{ ... }}` token.
+func TestExecResolvesKeychainRefsEndToEnd(t *testing.T) {
+	root := setupCLI(t)
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+	// Write an env-bearing settings.json so we don't depend on a real
+	// keychain during test — env is the same `{{ ... }}` render path.
+	src := filepath.Join(root, ".config/ccp/profiles/work/settings.json")
+	if err := os.WriteFile(src, []byte(`{"k":"{{ env.CCP_EXEC_TEST_SECRET }}"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCP_EXEC_TEST_SECRET", "shhh")
+
+	runtimeFile := filepath.Join(root, ".claude-work/settings.json")
+	out, _, err := runCLI(t, "", "exec", "work", "--", "/bin/cat", runtimeFile)
+	if err != nil {
+		t.Fatalf("exec: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, `"k":"shhh"`) {
+		t.Errorf("expected rendered value in %q", out)
+	}
+	if strings.Contains(out, "{{") {
+		t.Errorf("runtime still contains {{: %s", out)
+	}
+}
+
+// TestExecSkipsRefreshForProfilesWithoutRefs — no refs under source
+// means RefreshSymlinks must NOT be invoked (legacy fast path).
+func TestExecSkipsRefreshForProfilesWithoutRefs(t *testing.T) {
+	setupCLI(t)
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+	ResetExecRefreshCount()
+	if _, _, err := runCLI(t, "", "exec", "work", "--", "/bin/sh", "-c", ":"); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got := LoadExecRefreshCount(); got != 0 {
+		t.Errorf("refresh count = %d, want 0 (no refs means skip)", got)
+	}
+}
+
+// TestExecNoRefreshFlagSkipsRefreshEvenWithRefs — power-user escape
+// hatch: --no-refresh short-circuits even when the profile has refs.
+func TestExecNoRefreshFlagSkipsRefreshEvenWithRefs(t *testing.T) {
+	root := setupCLI(t)
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+	// Ref-bearing source.
+	src := filepath.Join(root, ".config/ccp/profiles/work/settings.json")
+	if err := os.WriteFile(src, []byte(`{"k":"{{ env.Y }}"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("Y", "v")
+	ResetExecRefreshCount()
+	if _, _, err := runCLI(t, "", "exec", "--no-refresh", "work", "--", "/bin/sh", "-c", ":"); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got := LoadExecRefreshCount(); got != 0 {
+		t.Errorf("refresh count = %d, want 0 with --no-refresh", got)
+	}
+}
+
+// TestExecTriggersRefreshForRefBearingProfile — confirms the opposite
+// of the two above: refs present and no flag → refresh runs exactly
+// once.
+func TestExecTriggersRefreshForRefBearingProfile(t *testing.T) {
+	root := setupCLI(t)
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(root, ".config/ccp/profiles/work/settings.json")
+	if err := os.WriteFile(src, []byte(`{"k":"{{ env.Z }}"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("Z", "v")
+	ResetExecRefreshCount()
+	if _, _, err := runCLI(t, "", "exec", "work", "--", "/bin/sh", "-c", ":"); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	if got := LoadExecRefreshCount(); got != 1 {
+		t.Errorf("refresh count = %d, want 1", got)
+	}
+}
