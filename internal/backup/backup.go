@@ -31,10 +31,10 @@ func New(baseDir, op string) (string, error) {
 	ts := time.Now().UTC().Format("2006-01-02T15-04-05")
 	name := ts + "_" + sanitize(op) + "_" + randomSuffix()
 	dir := filepath.Join(baseDir, name)
-	if err := os.Mkdir(filepath.Dir(dir), 0o755); err != nil && !os.IsExist(err) {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return "", fmt.Errorf("create backups dir: %w", err)
 	}
-	if err := os.Mkdir(dir, 0o755); err != nil {
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 	return dir, nil

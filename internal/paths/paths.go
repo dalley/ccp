@@ -19,7 +19,6 @@ type Paths struct {
 	ConfigDir    string // ~/.config/ccp (XDG-aware)
 	ProfilesDir  string // <ConfigDir>/profiles
 	BackupsDir   string // <ConfigDir>/backups
-	SecretsDir   string // <ConfigDir>/secrets (reserved for v2)
 	ManifestPath string // <ConfigDir>/manifest.toml
 	LockPath     string // <ConfigDir>/lock
 	ClaudeHome   string // ~/.claude — Claude's default config directory
@@ -43,7 +42,6 @@ func Resolve() (Paths, error) {
 		ConfigDir:    config,
 		ProfilesDir:  filepath.Join(config, "profiles"),
 		BackupsDir:   filepath.Join(config, "backups"),
-		SecretsDir:   filepath.Join(config, "secrets"),
 		ManifestPath: filepath.Join(config, "manifest.toml"),
 		LockPath:     filepath.Join(config, "lock"),
 		ClaudeHome:   filepath.Join(home, ".claude"),
@@ -66,11 +64,10 @@ func (p Paths) ProfileConfigDir(name string) string {
 // Safe to call repeatedly.
 func (p Paths) Ensure() error {
 	for _, d := range []string{p.ConfigDir, p.ProfilesDir, p.BackupsDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
 	}
-	// Secrets dir is more restrictive and only created when first written to.
 	return nil
 }
 

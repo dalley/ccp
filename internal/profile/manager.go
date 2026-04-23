@@ -42,7 +42,7 @@ func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 
 	// O_EXCL-style guard against concurrent Create races. Any error other
 	// than IsExist is fatal.
-	if err := os.Mkdir(pr.SourceDir, 0o755); err != nil {
+	if err := os.Mkdir(pr.SourceDir, 0o700); err != nil {
 		if os.IsExist(err) {
 			return pr, fmt.Errorf("%w: %s", ErrAlreadyExists, name)
 		}
@@ -62,6 +62,9 @@ func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 			return pr, err
 		}
 	case opts.FromProfile != "":
+		if err := ValidateName(opts.FromProfile); err != nil {
+			return pr, fmt.Errorf("--from %q: %w", opts.FromProfile, err)
+		}
 		src := New(p, opts.FromProfile)
 		if !src.Exists() {
 			return pr, fmt.Errorf("%w: %s (source for --from)", ErrNotFound, opts.FromProfile)
@@ -138,7 +141,7 @@ func Delete(p paths.Paths, name string, backupDir string) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 

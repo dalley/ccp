@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -296,6 +297,9 @@ type PullOptions struct {
 // if the working tree is dirty, it returns an error rather than clobbering.
 // Returns (changed, err) — changed=false means already up to date.
 func Pull(configDir string, opts PullOptions) (bool, error) {
+	if opts.Force && opts.BackupDir == "" {
+		return false, fmt.Errorf("force pull requires a non-empty BackupDir")
+	}
 	dirty, err := IsDirty(configDir)
 	if err != nil {
 		return false, err
@@ -661,16 +665,31 @@ func mergeCopyDir(src, dst string) error {
 		case info.IsDir():
 			return os.MkdirAll(target, info.Mode().Perm())
 		default:
-			b, err := os.ReadFile(path)
-			if err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 				return err
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			return os.WriteFile(target, b, info.Mode().Perm())
+			return streamCopyFile(path, target, info.Mode().Perm())
 		}
 	})
+}
+
+// streamCopyFile copies src → dst streaming via io.Copy so large files don't
+// load entirely into memory. mode sets the destination file's permission.
+func streamCopyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // signature builds a git author signature from env vars, falling back to

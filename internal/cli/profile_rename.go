@@ -29,7 +29,7 @@ func newProfileRenameCmd() *cobra.Command {
 				// whether one existed so we can warn the user — we don't
 				// automatically reinstall under the new name because the
 				// user's shellrc may not be the right target.
-				for _, rc := range []string{".zshrc", ".bashrc", ".bash_profile"} {
+				for _, rc := range []string{".zshrc", ".bashrc", ".bash_profile", ".config/fish/config.fish"} {
 					path := filepath.Join(s.Paths.Home, rc)
 					if profile.AliasExists(path, oldName) {
 						hadAlias = true

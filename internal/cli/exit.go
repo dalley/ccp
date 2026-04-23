@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"io/fs"
+	"syscall"
 
 	"github.com/dalley/ccp/internal/fslock"
 	"github.com/dalley/ccp/internal/profile"
@@ -38,6 +40,15 @@ func ExitCodeFor(err error) int {
 	var lockErr *fslock.ErrLockContended
 	if errors.As(err, &lockErr) {
 		return ExitConflict
+	}
+	switch {
+	case errors.Is(err, fs.ErrExist):
+		return ExitConflict
+	case errors.Is(err, fs.ErrPermission),
+		errors.Is(err, syscall.ENOSPC),
+		errors.Is(err, syscall.EROFS),
+		errors.Is(err, syscall.EIO):
+		return ExitState
 	}
 	return ExitUser
 }

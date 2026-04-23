@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,8 +69,15 @@ Examples:
 			if err := child.Run(); err != nil {
 				// Propagate the child's exit code. cobra takes care of the
 				// nonzero return code mapping.
-				if ee, ok := err.(*exec.ExitError); ok {
+				var ee *exec.ExitError
+				if errors.As(err, &ee) {
 					os.Exit(ee.ExitCode())
+				}
+				// Missing binary, ENOENT on cwd, etc. arrive as *exec.Error.
+				// Surface a clear message and let ExitCodeFor classify.
+				var pe *exec.Error
+				if errors.As(err, &pe) {
+					return fmt.Errorf("exec %s: %w", pe.Name, pe.Err)
 				}
 				return err
 			}

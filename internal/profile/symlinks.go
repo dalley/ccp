@@ -15,16 +15,23 @@ import (
 // Existing files/links at the target path that DON'T match are returned as
 // an error — we never silently overwrite user content.
 func (pr Profile) BuildSymlinks() error {
-	if err := os.MkdirAll(pr.ConfigDir, 0o755); err != nil {
+	if err := rejectSymlinksInSource(pr.SourceDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(pr.ConfigDir, 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	for _, item := range SharedItems {
 		src := filepath.Join(pr.SourceDir, item.Name)
-		if _, err := os.Lstat(src); err != nil {
+		info, err := os.Lstat(src)
+		if err != nil {
 			if os.IsNotExist(err) {
 				continue // source doesn't have this item; that's fine.
 			}
 			return fmt.Errorf("stat source %s: %w", src, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to link %s: source entry is a symlink (profile source may be tampered)", src)
 		}
 		dst := filepath.Join(pr.ConfigDir, item.Name)
 		if err := ensureSymlink(src, dst); err != nil {
@@ -32,6 +39,34 @@ func (pr Profile) BuildSymlinks() error {
 		}
 	}
 	return nil
+}
+
+// rejectSymlinksInSource walks root and returns an error if any descendant is
+// a symlink. The profile source is meant to hold only regular files and
+// directories — a symlink inside the source tree is an exfiltration vector
+// (a malicious git commit can place e.g. hooks/post-tool-use ->
+// ../../../../.aws/credentials, which BuildSymlinks would otherwise expose to
+// Claude via the runtime dir).
+func rejectSymlinksInSource(root string) error {
+	if _, err := os.Lstat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			rel, _ := filepath.Rel(root, path)
+			return fmt.Errorf("refusing to build symlinks: profile source contains a symlink at %s (suspected tampering)", rel)
+		}
+		return nil
+	})
 }
 
 // RefreshSymlinks does what BuildSymlinks does AND additionally removes any
