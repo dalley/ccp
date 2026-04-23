@@ -1,0 +1,76 @@
+version: 2
+
+project_name: ccp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ccp
+    main: ./cmd/ccp
+    binary: ccp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/dalley/ccp/internal/cli.Version={{.Version}}
+    # Parent dir has an unrelated .svn; tell the Go toolchain not to
+    # enforce single-VCS detection for release builds either.
+    flags:
+      - -buildvcs=false
+
+archives:
+  - id: ccp
+    name_template: >-
+      ccp_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: ccp
+    # The tap repo will be homebrew-ccp; create it when ready to publish.
+    repository:
+      owner: dalley
+      name: homebrew-ccp
+    homepage: "https://github.com/dalley/ccp"
+    description: "Manage multiple Claude Code profiles on one machine"
+    license: "MIT"
+    install: |
+      bin.install "ccp"
+      generate_completions_from_executable(bin/"ccp", "completion")
+    test: |
+      system "#{bin}/ccp version"
+
+release:
+  github:
+    owner: dalley
+    name: ccp
+  draft: true
+  prerelease: auto

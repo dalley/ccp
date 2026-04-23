@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+// Stub that runs the platform binary dropped in by install.js.
+const { spawnSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+const bin = path.join(__dirname, "ccp-bin");
+// If install.js already wrote the native binary in place, exec it.
+// The postinstall writes to <pkgroot>/bin/ccp which is THIS file — so the
+// native binary lands next to us under a different filename. Keep these
+// names in sync with install.js.
+const native = path.join(__dirname, "..", "bin", "ccp");
+if (fs.existsSync(bin)) {
+  const res = spawnSync(bin, process.argv.slice(2), { stdio: "inherit" });
+  process.exit(res.status == null ? 1 : res.status);
+}
+if (fs.existsSync(native) && native !== __filename) {
+  const res = spawnSync(native, process.argv.slice(2), { stdio: "inherit" });
+  process.exit(res.status == null ? 1 : res.status);
+}
+console.error("ccp: native binary missing. Re-run `npm install` to fetch it.");
+process.exit(1);

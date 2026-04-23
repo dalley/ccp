@@ -24,6 +24,7 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newProfileUseCmd())
 	root.AddCommand(newExecCmd())
 	root.AddCommand(newSyncCmd())
+	root.AddCommand(newPromptCmd())
 
 	return root
 }

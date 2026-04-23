@@ -1,0 +1,27 @@
+{
+  "name": "ccp-cli",
+  "version": "0.1.0",
+  "description": "Manage multiple Claude Code profiles on one machine (native binary, installed via npm)",
+  "bin": {
+    "ccp": "bin/ccp"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "install.js",
+    "bin/",
+    "LICENSE",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dalley/ccp.git"
+  },
+  "homepage": "https://github.com/dalley/ccp#readme",
+  "bugs": "https://github.com/dalley/ccp/issues",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}
