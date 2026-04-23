@@ -53,20 +53,23 @@ changelog:
       - "^test:"
       - "^chore:"
 
-brews:
-  - name: ccp
-    # The tap repo will be homebrew-ccp; create it when ready to publish.
-    repository:
-      owner: dalley
-      name: homebrew-ccp
-    homepage: "https://github.com/dalley/ccp"
-    description: "Manage multiple Claude Code profiles on one machine"
-    license: "MIT"
-    install: |
-      bin.install "ccp"
-      generate_completions_from_executable(bin/"ccp", "completion")
-    test: |
-      system "#{bin}/ccp version"
+# Homebrew formula publication is gated on the dalley/homebrew-ccp tap
+# existing and HOMEBREW_TAP_TOKEN being set in repo secrets. Until then,
+# releases produce archives + checksums only. Re-enable by uncommenting:
+# brews:
+#   - name: ccp
+#     repository:
+#       owner: dalley
+#       name: homebrew-ccp
+#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+#     homepage: "https://github.com/dalley/ccp"
+#     description: "Manage multiple Claude Code profiles on one machine"
+#     license: "MIT"
+#     install: |
+#       bin.install "ccp"
+#       generate_completions_from_executable(bin/"ccp", "completion")
+#     test: |
+#       system "#{bin}/ccp version"
 
 release:
   github:
