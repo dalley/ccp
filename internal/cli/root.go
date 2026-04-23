@@ -40,6 +40,8 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newExecCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newPromptCmd())
+	root.AddCommand(newAllowCmd())
+	root.AddCommand(newDenyCmd())
 
 	return root
 }
