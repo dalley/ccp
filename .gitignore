@@ -1,0 +1,6 @@
+/dist/
+/ccp
+/cmd/ccp/ccp
+*.test
+*.out
+.DS_Store

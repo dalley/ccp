@@ -1,0 +1,89 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/dalley/ccp/internal/profile"
+	"github.com/spf13/cobra"
+)
+
+func newProfileCreateCmd() *cobra.Command {
+	var (
+		fromCurrent bool
+		fromProfile string
+		withAlias   bool
+		shellrc     string
+	)
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a new profile",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			s, err := loadState()
+			if err != nil {
+				return err
+			}
+
+			var pr profile.Profile
+			err = withLock(s.Paths, func() error {
+				var ierr error
+				pr, ierr = profile.Create(s.Paths, name, profile.CreateOptions{
+					FromCurrent: fromCurrent,
+					FromProfile: fromProfile,
+				})
+				if ierr != nil {
+					return ierr
+				}
+				if withAlias {
+					rc, rerr := resolveShellrc(s.Paths.Home, shellrc)
+					if rerr != nil {
+						return rerr
+					}
+					return profile.InstallAlias(rc, name)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Created profile %q\n", pr.Name)
+			fmt.Fprintf(out, "  Source: %s\n", s.Paths.ToHomeRelative(pr.SourceDir))
+			fmt.Fprintf(out, "  Runtime: %s\n", s.Paths.ToHomeRelative(pr.ConfigDir))
+			if withAlias {
+				fmt.Fprintf(out, "Alias `claude-%s` installed; reload your shell to use it.\n", name)
+			} else {
+				fmt.Fprintf(out, "Activate with: ccp use %s\n", name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&fromCurrent, "from-current", false, "seed from ~/.claude/")
+	cmd.Flags().StringVar(&fromProfile, "from", "", "seed from an existing profile")
+	cmd.Flags().BoolVar(&withAlias, "alias", false, "install a shell alias `claude-<name>` that launches Claude with this profile")
+	cmd.Flags().StringVar(&shellrc, "shellrc", "", "path to the shellrc to write the alias into (defaults to ~/.zshrc or ~/.bashrc)")
+	return cmd
+}
+
+// resolveShellrc picks a shellrc file to operate on. Explicit path wins.
+// Otherwise we default to ~/.zshrc (most common on macOS), falling back to
+// ~/.bashrc if that's what exists, falling back to creating ~/.zshrc.
+func resolveShellrc(home, explicit string) (string, error) {
+	if explicit != "" {
+		if explicit[0] == '~' {
+			explicit = filepath.Join(home, explicit[1:])
+		}
+		return explicit, nil
+	}
+	for _, candidate := range []string{".zshrc", ".bashrc", ".bash_profile"} {
+		full := filepath.Join(home, candidate)
+		if _, err := os.Stat(full); err == nil {
+			return full, nil
+		}
+	}
+	return filepath.Join(home, ".zshrc"), nil
+}
