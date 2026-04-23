@@ -67,11 +67,19 @@ Examples:
 				"CCP_PROFILE="+name,
 			)
 			if err := child.Run(); err != nil {
-				// Propagate the child's exit code. cobra takes care of the
-				// nonzero return code mapping.
+				// Propagate the child's exit code. POSIX convention:
+				// signal-killed children return 128+signum so shells can
+				// distinguish e.g. SIGSEGV (139) from SIGKILL (137) from
+				// a plain non-zero exit. exec.ExitError.ExitCode() returns
+				// -1 for signal death, which os.Exit would truncate to 255
+				// — colliding with SSH transport-error convention.
 				var ee *exec.ExitError
 				if errors.As(err, &ee) {
-					os.Exit(ee.ExitCode())
+					code := ee.ExitCode()
+					if code < 0 {
+						code = signalExitCode(ee)
+					}
+					os.Exit(code)
 				}
 				// Missing binary, ENOENT on cwd, etc. arrive as *exec.Error.
 				// Surface a clear message and let ExitCodeFor classify.

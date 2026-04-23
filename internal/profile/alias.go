@@ -3,6 +3,7 @@ package profile
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -43,7 +44,7 @@ func InstallAlias(shellrcPath, name string) error {
 		}
 		content += "\n" + block
 	}
-	return os.WriteFile(shellrcPath, []byte(content), 0o644)
+	return atomicWriteFile(shellrcPath, []byte(content), 0o644)
 }
 
 // AliasExists reports whether shellrcPath currently contains an alias block
@@ -75,7 +76,41 @@ func UninstallAlias(shellrcPath, name string) error {
 	if newContent == content {
 		return nil
 	}
-	return os.WriteFile(shellrcPath, []byte(newContent), 0o644)
+	return atomicWriteFile(shellrcPath, []byte(newContent), 0o644)
+}
+
+// atomicWriteFile writes data to path via a temp file + rename. Preserves
+// the target's existing mode; falls back to `mode` when creating a new
+// file. Unlike os.WriteFile — which truncates the target before writing —
+// this leaves the original intact on any write-phase error (disk full,
+// permissions). Critical for shellrc writes: a botched truncate would
+// wipe the user's shell config.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".ccp-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful Rename
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // blockRegex returns a compiled pattern that matches the whole alias block

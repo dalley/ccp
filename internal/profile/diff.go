@@ -11,6 +11,11 @@ import (
 	"sort"
 )
 
+// ErrDiffFound is returned by the CLI layer when `ccp profile diff` finds
+// any differences. Agents use this sentinel via exit code 4 (conflict) to
+// branch on "act on the diff" vs "nothing to do" without parsing stdout.
+var ErrDiffFound = errors.New("profiles differ")
+
 // DiffEntry is one file or directory difference between two profiles.
 type DiffEntry struct {
 	// Path is relative to the profile source directory.

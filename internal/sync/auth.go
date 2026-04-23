@@ -2,12 +2,29 @@ package sync
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 )
+
+// warnWriter is where auth-related warnings go. Tests and JSON-output code
+// paths can swap this (via SetAuthWarnWriter) to io.Discard so warnings
+// don't land in structured output streams. Defaults to os.Stderr for
+// humans running the CLI.
+var warnWriter io.Writer = os.Stderr
+
+// SetAuthWarnWriter routes auth warnings (e.g. encrypted-key hint) to w.
+// Pass io.Discard to silence them; useful when the caller intends to
+// emit JSON on stderr and cannot tolerate interleaved prose.
+func SetAuthWarnWriter(w io.Writer) {
+	if w == nil {
+		w = io.Discard
+	}
+	warnWriter = w
+}
 
 // sshAuthFromEnv builds an SSH auth method from the user's environment.
 // Currently: use the SSH agent if SSH_AUTH_SOCK is present, otherwise fall
@@ -49,7 +66,7 @@ func sshAuthFromEnv() transport.AuthMethod {
 		}
 	}
 	if encryptedSeen {
-		fmt.Fprintln(os.Stderr, "ccp: ~/.ssh/id_ed25519 or id_rsa appears to be passphrase-encrypted. "+
+		fmt.Fprintln(warnWriter, "ccp: ~/.ssh/id_ed25519 or id_rsa appears to be passphrase-encrypted. "+
 			"Start ssh-agent and `ssh-add` your key, then re-run.")
 	}
 	return nil

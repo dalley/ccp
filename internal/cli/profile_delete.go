@@ -67,10 +67,17 @@ func newProfileDeleteCmd() *cobra.Command {
 				if s.Manifest.ActiveProfile == name {
 					s.Manifest.ActiveProfile = ""
 				}
-				return backup.Prune(s.Paths.BackupsDir, backup.DefaultRetention)
+				return nil
 			})
 			if err != nil {
 				return err
+			}
+			// Prune lives OUTSIDE withLockedState: a Prune failure (ENOSPC,
+			// permission) after the profile+manifest have both been
+			// mutated would otherwise cancel the manifest save and leave
+			// ActiveProfile pointing at the deleted profile.
+			if perr := backup.Prune(s.Paths.BackupsDir, backup.DefaultRetention); perr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "ccp: note: backup prune failed (%v); backup retention may exceed the configured ceiling.\n", perr)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Deleted profile %q. Backup: %s\n", name, s.Paths.ToHomeRelative(bkDir))
 			return nil

@@ -56,9 +56,28 @@ func NewChecked(p paths.Paths, name string) (Profile, error) {
 }
 
 // Exists reports whether the profile's source directory is present.
+// A missing directory returns false with no error; a permission-denied
+// error on the parent surfaces via ExistsErr because "Stat failed with
+// EACCES" should not be mistaken for "profile doesn't exist" — the
+// distinction matters for exit-code classification.
 func (pr Profile) Exists() bool {
+	ok, _ := pr.ExistsErr()
+	return ok
+}
+
+// ExistsErr is like Exists but returns the underlying stat error for
+// anything other than IsNotExist. Callers that need to distinguish
+// "profile absent" (nil error) from "profile unreachable" (permission,
+// I/O) should use this.
+func (pr Profile) ExistsErr() (bool, error) {
 	info, err := os.Stat(pr.SourceDir)
-	return err == nil && info.IsDir()
+	if err == nil {
+		return info.IsDir(), nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 // List enumerates profiles by reading ~/.config/ccp/profiles. Returns names

@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"syscall"
 
 	"github.com/dalley/ccp/internal/fslock"
@@ -34,6 +35,10 @@ func ExitCodeFor(err error) int {
 		return ExitUser
 	case errors.Is(err, profile.ErrAlreadyExists):
 		return ExitConflict
+	case errors.Is(err, profile.ErrDiffFound):
+		return ExitConflict
+	case errors.Is(err, profile.ErrDoctorFailed):
+		return ExitState
 	case errors.Is(err, ccpsync.ErrDirtyWorkingTree):
 		return ExitConflict
 	case errors.Is(err, ccpsync.ErrRemoteUnreachable):
@@ -51,6 +56,16 @@ func ExitCodeFor(err error) int {
 		errors.Is(err, syscall.EROFS),
 		errors.Is(err, syscall.EIO):
 		return ExitState
+	}
+	// An unrecognized error that mentions an internal ccp concern
+	// (manifest, symlink, backup, lock) is more likely a state/IO issue
+	// than a caller error. Misclassifying these as ExitUser leads agents
+	// to retry with different arguments when they should escalate.
+	msg := err.Error()
+	for _, hint := range []string{"manifest", "symlink", "backup", "lock file", "filesystem changes committed"} {
+		if strings.Contains(msg, hint) {
+			return ExitState
+		}
 	}
 	return ExitUser
 }

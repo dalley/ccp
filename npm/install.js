@@ -43,7 +43,12 @@ const ALLOWED_HOSTS = [
 ];
 
 // Safety bounds.
-const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024; // 64 MiB — generous for a Go CLI tarball.
+// MAX_DOWNLOAD_BYTES caps the compressed transfer.
+// MAX_DECOMPRESSED_BYTES caps the gunzipped archive size so a compression
+// bomb (e.g. 500 MB of zeros that fit in a 50 MB tarball) can't OOM Node
+// during gunzipSync.
+const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+const MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024;
 const SOCKET_TIMEOUT_MS = 30_000;
 const OVERALL_DEADLINE_MS = 120_000;
 
@@ -88,7 +93,11 @@ async function main() {
     throw new Error(`SHA-256 mismatch for ${archiveName}: expected ${expected}, got ${got}`);
   }
 
-  const tar = zlib.gunzipSync(gz);
+  // Decompress with an explicit output size limit. Without this, a
+  // crafted tarball that passes MAX_DOWNLOAD_BYTES (64 MiB compressed)
+  // but expands to multi-gigabyte output can OOM the Node process before
+  // the tar extractor ever sees the stream.
+  const tar = zlib.gunzipSync(gz, { maxOutputLength: MAX_DECOMPRESSED_BYTES });
   extractBinary(tar, "ccp", binPath);
   fs.chmodSync(binPath, 0o755);
   // Smoke-test the binary so an obviously broken download fails loudly

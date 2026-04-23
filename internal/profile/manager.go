@@ -48,11 +48,15 @@ func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 		}
 		return pr, fmt.Errorf("create source dir: %w", err)
 	}
-	// On any later failure, roll back the source dir so a retry can succeed.
+	// On any later failure, roll back BOTH the source dir AND the runtime
+	// config dir. BuildSymlinks mkdir-alls ConfigDir before creating any
+	// symlinks, so a BuildSymlinks failure partway through leaves an
+	// orphaned ~/.claude-<name> that no ccp command ever cleans up.
 	success := false
 	defer func() {
 		if !success {
 			_ = os.RemoveAll(pr.SourceDir)
+			_ = os.RemoveAll(pr.ConfigDir)
 		}
 	}()
 

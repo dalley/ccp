@@ -64,7 +64,10 @@ func newProfileDoctorCmd() *cobra.Command {
 				}
 			}
 			if errorsFound > 0 {
-				return fmt.Errorf("%d error(s) found", errorsFound)
+				// Wrap a typed sentinel so exit.go maps this to ExitState
+				// (2) — distinct from ExitUser (1, profile not found) and
+				// ExitOK (0, healthy or warnings only).
+				return fmt.Errorf("%d error(s) found: %w", errorsFound, profile.ErrDoctorFailed)
 			}
 			return nil
 		},

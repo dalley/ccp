@@ -83,7 +83,7 @@ func TestSyncSetupRefusesNonCcpRemote(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-ccp remote, got nil")
 	}
-	if !strings.Contains(err.Error(), "not a ccp-managed sync repo") {
+	if !strings.Contains(err.Error(), "missing or invalid .ccp-sync.json") {
 		t.Errorf("unexpected error: %v", err)
 	}
 	// The cloned content should be cleaned up so a retry is possible.

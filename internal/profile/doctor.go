@@ -1,12 +1,19 @@
 package profile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/dalley/ccp/internal/paths"
 )
+
+// ErrDoctorFailed is returned by the CLI when `ccp profile doctor` surfaces
+// at least one severity=error finding. Maps to exit code 2 (state error)
+// so agents can distinguish a broken profile from "profile not found"
+// (exit 1) or a warning-only run (exit 0).
+var ErrDoctorFailed = errors.New("doctor found errors")
 
 // DoctorFinding is one issue detected by Doctor — either a problem in a
 // profile's on-disk state or the cross-profile manifest state.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ func newProfileCreateCmd() *cobra.Command {
 		fromProfile string
 		withAlias   bool
 		shellrc     string
+		asJSON      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -52,6 +54,22 @@ func newProfileCreateCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
+			if asJSON {
+				rep := struct {
+					Name           string `json:"name"`
+					SourceDir      string `json:"source_dir"`
+					ConfigDir      string `json:"config_dir"`
+					AliasInstalled bool   `json:"alias_installed"`
+				}{
+					Name:           pr.Name,
+					SourceDir:      s.Paths.ToHomeRelative(pr.SourceDir),
+					ConfigDir:      s.Paths.ToHomeRelative(pr.ConfigDir),
+					AliasInstalled: withAlias,
+				}
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(rep)
+			}
 			fmt.Fprintf(out, "Created profile %q\n", pr.Name)
 			fmt.Fprintf(out, "  Source: %s\n", s.Paths.ToHomeRelative(pr.SourceDir))
 			fmt.Fprintf(out, "  Runtime: %s\n", s.Paths.ToHomeRelative(pr.ConfigDir))
@@ -67,6 +85,7 @@ func newProfileCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromProfile, "from", "", "seed from an existing profile")
 	cmd.Flags().BoolVar(&withAlias, "alias", false, "install a shell alias `claude-<name>` that launches Claude with this profile")
 	cmd.Flags().StringVar(&shellrc, "shellrc", "", "path to the shellrc to write the alias into (defaults to ~/.zshrc or ~/.bashrc)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON report instead of prose")
 	// Dynamic completion for --from: offer real profile names instead of
 	// falling back to filesystem path completion.
 	_ = cmd.RegisterFlagCompletionFunc("from", completeProfileName)

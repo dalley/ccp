@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -9,7 +10,8 @@ import (
 )
 
 func newProfileRenameCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:               "rename <old> <new>",
 		Short:             "Rename a profile",
 		Args:              cobra.ExactArgs(2),
@@ -44,7 +46,18 @@ func newProfileRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Renamed %q → %q\n", oldName, newName)
+			out := cmd.OutOrStdout()
+			if asJSON {
+				rep := struct {
+					Old          string `json:"old"`
+					New          string `json:"new"`
+					AliasRemoved bool   `json:"alias_removed"`
+				}{oldName, newName, hadAlias}
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(rep)
+			}
+			fmt.Fprintf(out, "Renamed %q → %q\n", oldName, newName)
 			if hadAlias {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"note: the `claude-%s` shell alias was removed. Re-add it for %q with:\n"+
@@ -54,4 +67,6 @@ func newProfileRenameCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON report instead of prose")
+	return cmd
 }

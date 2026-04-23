@@ -84,13 +84,25 @@ func Rollback(p paths.Paths, backupDir string) ([]string, error) {
 		return nil, errors.New("nothing to restore in backup")
 	}
 
-	// Execute moves. First failure aborts — partial restore is OK because
-	// each moved profile is independently valid and the remainder stays in
-	// the backup dir.
+	// Execute moves. Track completed moves so we can roll back on failure —
+	// partial restore is NOT safe because a source-only restore with no
+	// matching runtime dir lets the next `ccp use` create a fresh empty
+	// runtime, silently discarding the backed-up auth tokens.
+	done := make([]move, 0, len(moves))
 	for _, mv := range moves {
 		if err := os.Rename(mv.from, mv.to); err != nil {
+			// Roll back every completed move so the backup remains intact
+			// and the user can retry.
+			for i := len(done) - 1; i >= 0; i-- {
+				rb := done[i]
+				if rerr := os.Rename(rb.to, rb.from); rerr != nil {
+					return nil, fmt.Errorf("restore %s failed (%v); rollback of %s also failed: %w",
+						mv.name, err, rb.name, rerr)
+				}
+			}
 			return nil, fmt.Errorf("restore %s: %w", mv.name, err)
 		}
+		done = append(done, mv)
 	}
 
 	// Clean up the backup dir if it's now empty (rename-based moves emptied

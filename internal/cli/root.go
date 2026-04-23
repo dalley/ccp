@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"io"
+
+	ccpsync "github.com/dalley/ccp/internal/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -12,6 +15,16 @@ func NewRoot() *cobra.Command {
 		Long:          "ccp keeps multiple named Claude Code configurations on one machine and switches between them.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// Silence SSH auth warnings when ANY command runs with --json
+			// so structured output isn't interleaved with prose. The flag
+			// is looked up defensively: commands that don't define it
+			// just fall through.
+			if jf := cmd.Flags().Lookup("json"); jf != nil && jf.Value.String() == "true" {
+				ccpsync.SetAuthWarnWriter(io.Discard)
+			}
+			return nil
+		},
 	}
 
 	root.AddCommand(newVersionCmd())

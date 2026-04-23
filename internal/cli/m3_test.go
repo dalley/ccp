@@ -21,9 +21,14 @@ func TestDiffBetweenTwoProfiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".config/ccp/profiles/b/settings.json"), []byte("B"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Diff with actual differences returns ErrDiffFound (exit code 4) so
+	// agents can branch without parsing stdout. JSON/prose still lands.
 	out, _, err := runCLI(t, "", "profile", "diff", "a", "b")
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected ErrDiffFound when profiles differ")
+	}
+	if ExitCodeFor(err) != ExitConflict {
+		t.Errorf("exit code = %d, want %d (conflict)", ExitCodeFor(err), ExitConflict)
 	}
 	if !strings.Contains(out, "~ changed") || !strings.Contains(out, "settings.json") {
 		t.Errorf("diff output missing changed marker:\n%s", out)

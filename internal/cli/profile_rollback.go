@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/dalley/ccp/internal/backup"
@@ -9,7 +10,8 @@ import (
 )
 
 func newProfileRollbackCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "rollback",
 		Short: "Restore the most recent backup (undo the last delete)",
 		Args:  cobra.NoArgs,
@@ -45,12 +47,27 @@ func newProfileRollbackCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Restored %d profile(s) from %s:\n",
+			out := cmd.OutOrStdout()
+			if asJSON {
+				rep := struct {
+					Backup   string   `json:"backup"`
+					Restored []string `json:"restored"`
+				}{
+					Backup:   s.Paths.ToHomeRelative(latest),
+					Restored: restored,
+				}
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(rep)
+			}
+			fmt.Fprintf(out, "Restored %d profile(s) from %s:\n",
 				len(restored), s.Paths.ToHomeRelative(latest))
 			for _, n := range restored {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", n)
+				fmt.Fprintf(out, "  %s\n", n)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON report instead of prose")
+	return cmd
 }

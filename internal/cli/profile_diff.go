@@ -56,21 +56,29 @@ func newProfileDiffCmd() *cobra.Command {
 				if entries == nil {
 					entries = []profile.DiffEntry{}
 				}
-				return enc.Encode(entries)
-			}
-			if len(entries) == 0 {
+				if err := enc.Encode(entries); err != nil {
+					return err
+				}
+			} else if len(entries) == 0 {
 				fmt.Fprintf(out, "%s and %s are identical\n", aName, bName)
-				return nil
+			} else {
+				fmt.Fprintf(out, "Diff %s vs %s:\n", aName, bName)
+				for _, e := range entries {
+					marker := map[profile.DiffKind]string{
+						profile.DiffOnlyInA:      fmt.Sprintf("- only in %s", aName),
+						profile.DiffOnlyInB:      fmt.Sprintf("+ only in %s", bName),
+						profile.DiffChanged:      "~ changed",
+						profile.DiffTypeMismatch: "! file/dir type mismatch",
+					}[e.Kind]
+					fmt.Fprintf(out, "  %s  %s\n", marker, e.Path)
+				}
 			}
-			fmt.Fprintf(out, "Diff %s vs %s:\n", aName, bName)
-			for _, e := range entries {
-				marker := map[profile.DiffKind]string{
-					profile.DiffOnlyInA:      fmt.Sprintf("- only in %s", aName),
-					profile.DiffOnlyInB:      fmt.Sprintf("+ only in %s", bName),
-					profile.DiffChanged:      "~ changed",
-					profile.DiffTypeMismatch: "! file/dir type mismatch",
-				}[e.Kind]
-				fmt.Fprintf(out, "  %s  %s\n", marker, e.Path)
+			// Differences → exit 4 (conflict) so agents can branch on
+			// status alone without parsing stdout. Identical → exit 0.
+			// JSON is always emitted; the sentinel fires after so the
+			// structured output still lands.
+			if len(entries) > 0 {
+				return profile.ErrDiffFound
 			}
 			return nil
 		},

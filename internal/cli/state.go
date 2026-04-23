@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/dalley/ccp/internal/fslock"
 	"github.com/dalley/ccp/internal/manifest"
 	"github.com/dalley/ccp/internal/paths"
@@ -47,6 +49,13 @@ func withLock(p paths.Paths, fn func() error) error {
 // than `loadState` + `withLock` — the latter has a TOCTOU window between
 // load and lock-acquisition that lets concurrent writers overwrite each
 // other silently.
+//
+// Save is non-atomic with respect to fn's filesystem mutations — if fn
+// commits a rename/delete and manifest.Save then fails (out-of-space,
+// permission), the on-disk state diverges from the manifest. We surface
+// that divergence loudly rather than silently; truly atomic two-phase
+// commit would require each caller to produce an inverse operation and is
+// out of scope.
 func withLockedState(p paths.Paths, fn func(s *state) error) error {
 	return withLock(p, func() error {
 		m, _, err := manifest.Load(p.ManifestPath)
@@ -57,6 +66,10 @@ func withLockedState(p paths.Paths, fn func(s *state) error) error {
 		if err := fn(s); err != nil {
 			return err
 		}
-		return manifest.Save(p.ManifestPath, s.Manifest)
+		if err := manifest.Save(p.ManifestPath, s.Manifest); err != nil {
+			return fmt.Errorf("filesystem changes committed but manifest save failed — "+
+				"inspect ~/.config/ccp/manifest.toml and re-run the command to repair: %w", err)
+		}
+		return nil
 	})
 }

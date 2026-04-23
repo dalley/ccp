@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,8 +12,9 @@ import (
 
 func newSyncSetupCmd() *cobra.Command {
 	var (
-		url   string
-		force bool
+		url    string
+		force  bool
+		asJSON bool
 	)
 	cmd := &cobra.Command{
 		Use:   "setup",
@@ -31,7 +33,6 @@ func newSyncSetupCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				cloned := false
 				if url != "" && !existing {
 					err := ccpsync.CloneOrOpen(s.Paths.ConfigDir, url)
 					// Empty remote is expected when this is the FIRST
@@ -40,25 +41,34 @@ func newSyncSetupCmd() *cobra.Command {
 					if err != nil && !errors.Is(err, ccpsync.ErrRemoteEmpty) {
 						return err
 					}
-					cloned = err == nil
 				}
 
-				// After a clone, verify the remote is a ccp-managed sync
-				// repo before we run InitRepo (which would otherwise
-				// overwrite the marker). An unverified clone is refused
-				// unless --force was passed; the cloned content is removed
-				// so the user can retry against a different URL.
-				if cloned {
+				// Verify a .ccp-sync.json marker with managedBy=ccp is
+				// present whenever we're adopting an existing on-disk .git
+				// — even if it was left behind by a half-completed clone
+				// on a previous invocation. Without this check, a user
+				// running `ccp sync setup --url <hostile>` where a partial
+				// clone succeeded earlier would adopt the hostile remote
+				// because IsSyncRepo=true skips the clone-path check.
+				//
+				// The check is skipped when there's no .git yet (fresh
+				// first-ever setup against an empty remote, pre-InitRepo)
+				// and when --force is set.
+				repoPresent, _ := ccpsync.IsSyncRepo(s.Paths.ConfigDir)
+				if repoPresent && !force {
 					marker, err := ccpsync.ReadMarker(s.Paths.ConfigDir)
 					if err != nil {
 						return err
 					}
-					if (marker == nil || marker.ManagedBy != "ccp") && !force {
+					if marker == nil || marker.ManagedBy != "ccp" {
 						_ = os.RemoveAll(s.Paths.ConfigDir + "/.git")
 						_ = os.RemoveAll(s.Paths.ProfilesDir)
-						return fmt.Errorf("remote at %s is not a ccp-managed sync repo "+
-							"(missing or invalid .ccp-sync.json marker). Re-run with --force "+
-							"to adopt it anyway, or point --url at a ccp sync repo.", url)
+						remoteDesc := url
+						if remoteDesc == "" {
+							remoteDesc = s.Paths.ConfigDir
+						}
+						return fmt.Errorf("refusing to adopt %s: missing or invalid .ccp-sync.json marker (expected managedBy=\"ccp\"). "+
+							"Re-run with --force to adopt anyway, or point --url at a ccp sync repo.", remoteDesc)
 					}
 				}
 
@@ -79,6 +89,20 @@ func newSyncSetupCmd() *cobra.Command {
 					return err
 				}
 				out := cmd.OutOrStdout()
+				if asJSON {
+					rep := struct {
+						ConfigDir string          `json:"config_dir"`
+						Remote    string          `json:"remote,omitempty"`
+						Marker    *ccpsync.Marker `json:"marker,omitempty"`
+					}{
+						ConfigDir: s.Paths.ToHomeRelative(s.Paths.ConfigDir),
+						Remote:    url,
+						Marker:    marker,
+					}
+					enc := json.NewEncoder(out)
+					enc.SetIndent("", "  ")
+					return enc.Encode(rep)
+				}
 				fmt.Fprintf(out, "Sync ready at %s\n", s.Paths.ToHomeRelative(s.Paths.ConfigDir))
 				if url != "" {
 					fmt.Fprintf(out, "Remote:  %s\n", url)
@@ -93,5 +117,6 @@ func newSyncSetupCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&url, "url", "", "git remote URL (origin)")
 	cmd.Flags().BoolVar(&force, "force", false, "adopt a remote even when it lacks a valid ccp-sync marker")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON report instead of prose")
 	return cmd
 }

@@ -63,13 +63,19 @@ func TestDiffJSONRoundTrips(t *testing.T) {
 		[]byte("B"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Diff still emits the JSON array on stdout even when it exits
+	// non-zero via ErrDiffFound; agents must be able to parse the output
+	// regardless of exit.
 	out, _, err := runCLI(t, "", "profile", "diff", "a", "b", "--json")
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected ErrDiffFound when profiles differ")
+	}
+	if ExitCodeFor(err) != ExitConflict {
+		t.Errorf("exit code = %d, want %d (conflict)", ExitCodeFor(err), ExitConflict)
 	}
 	var entries []profile.DiffEntry
-	if err := json.Unmarshal([]byte(out), &entries); err != nil {
-		t.Fatalf("unmarshal: %v\nout: %s", err, out)
+	if jerr := json.Unmarshal([]byte(out), &entries); jerr != nil {
+		t.Fatalf("unmarshal: %v\nout: %s", jerr, out)
 	}
 	if len(entries) != 1 || entries[0].Kind != profile.DiffChanged || entries[0].Path != "settings.json" {
 		t.Errorf("unexpected entries: %+v", entries)

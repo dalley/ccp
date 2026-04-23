@@ -25,6 +25,10 @@ func ExitCodeFor(err error) int {
 		return ExitUser
 	case errors.Is(err, profile.ErrAlreadyExists):
 		return ExitConflict
+	case errors.Is(err, profile.ErrDiffFound):
+		return ExitConflict
+	case errors.Is(err, profile.ErrDoctorFailed):
+		return ExitState
 	case errors.Is(err, ccpsync.ErrDirtyWorkingTree):
 		return ExitConflict
 	case errors.Is(err, ccpsync.ErrRemoteUnreachable):
