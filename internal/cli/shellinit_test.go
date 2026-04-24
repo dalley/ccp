@@ -686,6 +686,138 @@ func TestShellInitFishAutoActivateAllowedMarker(t *testing.T) {
 	}
 }
 
+// TestShellInitWalkStopsAtHomeBoundary verifies the POSIX walk-up loop
+// does NOT cross $HOME. Layout: marker at $TMP/.claude-profile (above the
+// synthetic $HOME); cwd under $HOME. Expectation: marker not found, the
+// snippet falls through to the legacy path (no CLAUDE_CONFIG_DIR set if
+// no CCP_PROFILE either).
+func TestShellInitWalkStopsAtHomeBoundary(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	e := newScenarioEnv(t)
+
+	// Plant a marker one level above the synthetic HOME.
+	aboveHome := filepath.Dir(e.home)
+	marker := filepath.Join(aboveHome, ".claude-profile")
+	if err := os.WriteFile(marker, []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(e.home, "inside", "project")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `set -e
+unset CLAUDE_CONFIG_DIR
+unset CCP_PROFILE
+cd "` + sub + `"
+. "$SNIPPET"
+printf 'CONFIG=%s\n' "$CLAUDE_CONFIG_DIR"
+printf 'MARKER=%s\n' "$CCP_AUTO_MARKER"
+printf 'NOMARKER=%s\n' "$CCP_AUTO_NOMARKER_ROOT"
+`
+	stdout, stderr, err := e.run(t, script)
+	if err != nil {
+		t.Fatalf("sh failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	// The walk must stop at $HOME, so no marker is found. CONFIG stays
+	// empty (no CCP_PROFILE), MARKER stays empty, and NOMARKER gets
+	// populated (the negative cache).
+	if line := extractLine(stdout, "CONFIG="); line != "CONFIG=" {
+		t.Errorf("expected empty CONFIG (walk stopped at $HOME), got %q\nstderr: %s", line, stderr)
+	}
+	if line := extractLine(stdout, "MARKER="); line != "MARKER=" {
+		t.Errorf("expected empty MARKER (walk stopped at $HOME), got %q", line)
+	}
+	if !strings.Contains(stdout, "NOMARKER="+sub) {
+		t.Errorf("expected NOMARKER=%s (no-marker cache), got:\n%s", sub, stdout)
+	}
+}
+
+// TestShellInitWalkStopsAtGitBoundary verifies the POSIX walk-up loop
+// stops at a .git directory. Layout: marker at $HOME/.claude-profile (above
+// a repo); .git in $HOME/repo/.git; cwd at $HOME/repo/sub. Expectation:
+// walk stops at $HOME/repo because of .git, the marker above is NOT found.
+func TestShellInitWalkStopsAtGitBoundary(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	e := newScenarioEnv(t)
+
+	// Marker at $HOME/.claude-profile.
+	marker := filepath.Join(e.home, ".claude-profile")
+	if err := os.WriteFile(marker, []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Repo with .git below $HOME.
+	repo := filepath.Join(e.home, "repo")
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := `set -e
+unset CLAUDE_CONFIG_DIR
+unset CCP_PROFILE
+cd "` + sub + `"
+. "$SNIPPET"
+printf 'MARKER=%s\n' "$CCP_AUTO_MARKER"
+`
+	stdout, stderr, err := e.run(t, script)
+	if err != nil {
+		t.Fatalf("sh failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	// Walk stops at $HOME/repo because of .git; marker above NOT found.
+	if line := extractLine(stdout, "MARKER="); line != "MARKER=" {
+		t.Errorf("expected empty MARKER (walk stopped at .git), got %q\nstderr: %s", line, stderr)
+	}
+}
+
+// TestShellInitWalkFindsMarkerAtGitRoot verifies that a .git directory in
+// the SAME dir as a marker does not block the check — the marker is found
+// first. Layout: $HOME/repo/.git + $HOME/repo/.claude-profile, cwd at
+// $HOME/repo/sub. Expectation: marker at $HOME/repo IS found.
+func TestShellInitWalkFindsMarkerAtGitRoot(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	e := newScenarioEnv(t)
+
+	repo := filepath.Join(e.home, "repo")
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(repo, ".claude-profile")
+	if err := os.WriteFile(marker, []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCP_ROOT", e.ccpRoot)
+	p, _ := paths.Resolve()
+	approveMarkerFile(t, p, marker)
+
+	script := `set -e
+unset CLAUDE_CONFIG_DIR
+cd "` + sub + `"
+. "$SNIPPET"
+printf 'MARKER=%s\n' "$CCP_AUTO_MARKER"
+`
+	stdout, stderr, err := e.run(t, script)
+	if err != nil {
+		t.Fatalf("sh failed: %v\nstdout: %s\nstderr: %s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "MARKER="+marker) {
+		t.Errorf("expected MARKER=%s (marker at repo root is found), got:\n%s", marker, stdout)
+	}
+}
+
 // itoaUnix renders an int64 unix time as decimal without importing strconv.
 func itoaUnix(n int64) string {
 	if n == 0 {

@@ -114,6 +114,11 @@ __ccp_activate() {
     return
   fi
   # Walk up from $PWD for .claude-profile, bounded by 64 ancestors.
+  # Also bounded by $HOME (never cross the user's home boundary) and by
+  # the nearest .git directory (repo boundary — mirrors allowlist.FindMarker's
+  # behaviour so the shell short-circuits before forking ccp). Both stop
+  # AFTER checking for a marker at the current level, so a marker in $HOME
+  # or at a repo root is still found.
   # Do not mutate the user's $PWD.
   local _ccp_d="$PWD"
   local _ccp_marker=""
@@ -123,6 +128,8 @@ __ccp_activate() {
       _ccp_marker="$_ccp_d/.claude-profile"
       break
     fi
+    [ -n "$HOME" ] && [ "$_ccp_d" = "$HOME" ] && break
+    [ -d "$_ccp_d/.git" ] && break
     case "$_ccp_d" in
       /|'') break ;;
     esac
@@ -240,9 +247,19 @@ function __ccp_activate
   set -l d $PWD
   set -l marker ""
   set -l i 0
+  # Walk up from $PWD for .claude-profile, bounded by 64 ancestors, by
+  # $HOME, and by the nearest .git directory. Mirrors the POSIX variant's
+  # boundaries: check for the marker at the current level first, then
+  # stop if we're at $HOME or at a repo root.
   while test $i -lt 64
     if test -f "$d/.claude-profile"
       set marker "$d/.claude-profile"
+      break
+    end
+    if test -n "$HOME"; and test "$d" = "$HOME"
+      break
+    end
+    if test -d "$d/.git"
       break
     end
     if test "$d" = "/"; or test -z "$d"
