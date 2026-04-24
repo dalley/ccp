@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -43,6 +46,53 @@ func TestMigrationAdvisoryFiresOnceOnFirstUse(t *testing.T) {
 	}
 	if strings.Contains(stderr2, "upgraded from") {
 		t.Errorf("general upgrade advisory fired unexpectedly:\n%s", stderr2)
+	}
+}
+
+// TestUseShellIsSafeToEvalInSh stands up a CCP_ROOT whose path contains a
+// `$` and a single quote and verifies that `ccp use --shell`'s output can
+// be sourced in a real /bin/sh without the shell treating those bytes as
+// metacharacters. Catches the regression where we'd use `%q` (Go quoting,
+// which doesn't neutralise `$`) instead of a POSIX single-quote wrapper.
+//
+// Parallels the live-sh pattern from shellinit_test.go:TestShellInitPosixActuallyRunsInSh.
+func TestUseShellIsSafeToEvalInSh(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	// t.TempDir() under a parent path with `$` and `'` — we construct it
+	// by nesting under the default temp dir and naming the child with
+	// shell-hostile bytes.
+	base := t.TempDir()
+	hostile := filepath.Join(base, "it's $weird")
+	if err := os.MkdirAll(hostile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCP_ROOT", hostile)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	out, _, err := runCLI(t, "", "use", "work", "--shell")
+	if err != nil {
+		t.Fatalf("use --shell: %v\n%s", err, out)
+	}
+	// Eval the output in /bin/sh and echo back the resulting env.
+	script := "set -e\n" + out + "\nprintf 'DIR=%s\\n' \"$CLAUDE_CONFIG_DIR\"\nprintf 'PROF=%s\\n' \"$CCP_PROFILE\"\n"
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Env = []string{"PATH=/usr/bin:/bin"}
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sh eval failed: %v\nscript:\n%s\noutput:\n%s", err, script, got)
+	}
+	gotStr := string(got)
+	// CLAUDE_CONFIG_DIR should contain the hostile path intact.
+	if !strings.Contains(gotStr, "DIR="+hostile) {
+		t.Errorf("CLAUDE_CONFIG_DIR mis-quoted; got:\n%s\nwanted substring: DIR=%s", gotStr, hostile)
+	}
+	if !strings.Contains(gotStr, "PROF=work") {
+		t.Errorf("CCP_PROFILE mis-quoted; got:\n%s", gotStr)
 	}
 }
 

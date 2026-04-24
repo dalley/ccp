@@ -33,8 +33,13 @@ func newProfileUseCmd() *cobra.Command {
 				// Emit a line the caller can eval to set env for the current
 				// shell — same idiom as `ssh-agent -s` or `nvm use` returning
 				// a function call.
-				fmt.Fprintf(cmd.OutOrStdout(), "export CLAUDE_CONFIG_DIR=%q\nexport CCP_PROFILE=%s\n",
-					pr.ConfigDir, name)
+				// shellQuote both values so a ConfigDir containing
+				// `$` or `'` (exotic HOMEs, or a CCP_ROOT under a path
+				// with spaces) is safe to eval in /bin/sh. The profile
+				// name is already regex-validated, but we quote it too
+				// for consistency.
+				fmt.Fprintf(cmd.OutOrStdout(), "export CLAUDE_CONFIG_DIR=%s\nexport CCP_PROFILE=%s\n",
+					shellQuote(pr.ConfigDir), shellQuote(name))
 				return nil
 			}
 
