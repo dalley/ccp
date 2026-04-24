@@ -91,12 +91,23 @@ func registerShellResolveDirCmd(root *cobra.Command) {
 //   No marker / any error / symlinked marker / malformed marker:
 //       (empty stdout; exit 0)
 func newShellResolveDirCmd() *cobra.Command {
-	return &cobra.Command{
+	var shellFlag string
+	cmd := &cobra.Command{
 		Use:    "shell-resolve-dir <dir>",
 		Short:  "Resolve the .claude-profile marker for <dir> (hidden; used by shell-init)",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			emit := emitterForShell(shellFlag)
+			if emit == nil {
+				// Unknown shell: fail closed like every other hot-path
+				// error — the shell hook can't safely surface a stderr
+				// message without corrupting prompts, and a typo in the
+				// `--shell` value should be diagnosed via `ccp shell-init
+				// --help`, not here.
+				return nil
+			}
+
 			dir := args[0]
 			if dir == "" {
 				return nil
@@ -173,15 +184,16 @@ func newShellResolveDirCmd() *cobra.Command {
 				if err != nil {
 					return nil
 				}
-				// Three-line emission; every value shellQuote-wrapped.
-				_, _ = fmt.Fprintf(out, "CCP_AUTO_PROFILE=%s\n", shellQuote(name))
-				_, _ = fmt.Fprintf(out, "CCP_AUTO_MARKER=%s\n", shellQuote(abs))
-				_, _ = fmt.Fprintf(out, "CCP_AUTO_MARKER_MTIME=%s\n",
-					shellQuote(fmt.Sprintf("%d", info.ModTime().Unix())))
+				// Three-line emission; every value quoted with the
+				// shell-specific escape helper.
+				_, _ = fmt.Fprint(out, emit("CCP_AUTO_PROFILE", name))
+				_, _ = fmt.Fprint(out, emit("CCP_AUTO_MARKER", abs))
+				_, _ = fmt.Fprint(out, emit("CCP_AUTO_MARKER_MTIME",
+					fmt.Sprintf("%d", info.ModTime().Unix())))
 			case allowlist.StatusHashMismatch:
-				_, _ = fmt.Fprintf(out, "CCP_AUTO_WARN=%s\n", shellQuote("drift"))
+				_, _ = fmt.Fprint(out, emit("CCP_AUTO_WARN", "drift"))
 			case allowlist.StatusUnallowed:
-				_, _ = fmt.Fprintf(out, "CCP_AUTO_WARN=%s\n", shellQuote("unallowed"))
+				_, _ = fmt.Fprint(out, emit("CCP_AUTO_WARN", "unallowed"))
 			default:
 				// Any error from Check (unreadable allowlist, I/O hiccup
 				// hashing the marker) lands here with StatusUnallowed's
@@ -191,6 +203,38 @@ func newShellResolveDirCmd() *cobra.Command {
 			}
 			return nil
 		},
+	}
+	// --shell selects the output syntax. Default "posix" preserves the
+	// v2.0 contract (bash/zsh snippets eval raw `VAR='value'` statements).
+	// fish cannot `eval VAR=value` — only as a command env prefix — so
+	// its snippet passes --shell=fish and we emit `set -gx VAR 'value'`
+	// instead. Explicitly named (not inferred) so the command stays
+	// deterministic regardless of the invoking shell's env.
+	cmd.Flags().StringVar(&shellFlag, "shell", "posix",
+		"output syntax: posix (VAR='value') or fish (set -gx VAR 'value')")
+	return cmd
+}
+
+// emitter renders one KEY=value line in the target shell's syntax.
+// Returns the full line including trailing newline so callers can
+// Fprint without extra formatting.
+type emitter func(name, value string) string
+
+// emitterForShell picks the emitter for the given --shell value.
+// Returns nil for unrecognized shells — the hot-path caller swallows
+// the nil as "silent skip, exit 0" per the always-silent invariant.
+func emitterForShell(shell string) emitter {
+	switch shell {
+	case "", "posix", "sh", "bash", "zsh":
+		return func(name, value string) string {
+			return fmt.Sprintf("%s=%s\n", name, shellQuote(value))
+		}
+	case "fish":
+		return func(name, value string) string {
+			return fmt.Sprintf("set -gx %s %s\n", name, fishQuote(value))
+		}
+	default:
+		return nil
 	}
 }
 
@@ -216,4 +260,23 @@ func errorIsBenignAllowlistSignal(err error) bool {
 // quoting discipline alongside every emission site.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// fishQuote wraps s in fish-safe single quotes. Fish single-quoted
+// strings treat two sequences specially:
+//
+//   - `\\` → literal backslash
+//   - `\'` → literal single quote
+//
+// …and leave every other byte (including `$`, backtick, newline) literal.
+// So the escape rule is: backslash first (else the `\\'` we write for a
+// single quote would be re-interpreted as `\` + `'`), single quote second.
+//
+// Reference: https://fishshell.com/docs/current/language.html#quotes
+func fishQuote(s string) string {
+	// Escape backslashes first so the second pass can safely introduce
+	// more backslashes without re-escaping them.
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return "'" + s + "'"
 }

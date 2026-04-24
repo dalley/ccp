@@ -288,7 +288,13 @@ function __ccp_activate
   set -e CCP_AUTO_PROFILE
   set -e CCP_AUTO_WARN
   if command -q ccp
-    eval (ccp shell-resolve-dir "$d" 2>/dev/null | string collect)
+    # --shell=fish is load-bearing: fish cannot eval raw VAR='value'
+    # statements (that syntax is only valid as a command env prefix),
+    # so the resolver must emit set -gx VAR 'value' instead. Without
+    # this flag, CCP_AUTO_* vars are NEVER set in fish and the whole
+    # auto-activation layer silently no-ops -- including the
+    # drift/unallowed warnings.
+    eval (ccp shell-resolve-dir --shell=fish "$d" 2>/dev/null | string collect)
   end
   if set -q CCP_AUTO_WARN; and test -n "$CCP_AUTO_WARN"
     set -l key (string replace -ra '[^A-Za-z0-9]' '' -- "$marker")

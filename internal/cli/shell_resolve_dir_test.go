@@ -451,6 +451,217 @@ func TestShellQuoteFixedExamples(t *testing.T) {
 	}
 }
 
+// TestShellResolveDirFishModeEmitsSetGX exercises the fish output path:
+// the emission must use `set -gx NAME 'value'` syntax (valid in fish)
+// rather than POSIX `NAME='value'` (which fish's eval rejects). This is
+// the direct regression guard for Finding #3 — without --shell=fish the
+// resolver emits POSIX, fish refuses to eval it, and CCP_AUTO_* are
+// never set in fish sessions.
+func TestShellResolveDirFishModeEmitsSetGX(t *testing.T) {
+	root := setupCLI(t)
+	repo := filepath.Join(root, "repo")
+	marker := filepath.Join(repo, ".claude-profile")
+	writeMarker(t, marker, "work\n")
+
+	p, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveMarker(t, p, marker)
+
+	out, _, err := runCLI(t, "", "shell-resolve-dir", "--shell=fish", repo)
+	if err != nil {
+		t.Fatalf("shell-resolve-dir --shell=fish: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d:\n%s", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], "set -gx CCP_AUTO_PROFILE 'work'") {
+		t.Errorf("line 0 = %q, want prefix set -gx CCP_AUTO_PROFILE 'work'", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "set -gx CCP_AUTO_MARKER '"+marker+"'") {
+		t.Errorf("line 1 = %q, want prefix set -gx CCP_AUTO_MARKER '<marker>'", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "set -gx CCP_AUTO_MARKER_MTIME '") {
+		t.Errorf("line 2 = %q, want prefix set -gx CCP_AUTO_MARKER_MTIME '<unix>'", lines[2])
+	}
+}
+
+// TestShellResolveDirFishModeDriftAndUnallowed verifies the warning
+// emissions in fish mode match the one-line contract.
+func TestShellResolveDirFishModeDriftAndUnallowed(t *testing.T) {
+	root := setupCLI(t)
+
+	// Unallowed (no allowlist entry).
+	repoUnallowed := filepath.Join(root, "repo-unallowed")
+	writeMarker(t, filepath.Join(repoUnallowed, ".claude-profile"), "work\n")
+	out, _, err := runCLI(t, "", "shell-resolve-dir", "--shell=fish", repoUnallowed)
+	if err != nil {
+		t.Fatalf("shell-resolve-dir --shell=fish: %v", err)
+	}
+	if out != "set -gx CCP_AUTO_WARN 'unallowed'\n" {
+		t.Errorf("unallowed output = %q, want set -gx CCP_AUTO_WARN 'unallowed'\\n", out)
+	}
+
+	// Drift (allowed then mutated).
+	repoDrift := filepath.Join(root, "repo-drift")
+	marker := filepath.Join(repoDrift, ".claude-profile")
+	writeMarker(t, marker, "work\n")
+	p, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveMarker(t, p, marker)
+	writeMarker(t, marker, "personal\n")
+	out, _, err = runCLI(t, "", "shell-resolve-dir", "--shell=fish", repoDrift)
+	if err != nil {
+		t.Fatalf("shell-resolve-dir --shell=fish drift: %v", err)
+	}
+	if out != "set -gx CCP_AUTO_WARN 'drift'\n" {
+		t.Errorf("drift output = %q, want set -gx CCP_AUTO_WARN 'drift'\\n", out)
+	}
+}
+
+// TestShellResolveDirFishModeLiveFishParses sources the emitted fish
+// output through an actual fish binary and reads the resulting vars
+// back. Skipped when fish isn't on PATH.
+//
+// Pairs with TestShellQuoteCorpus to give end-to-end coverage of fishQuote
+// correctness: the round trip is the ultimate test for whether the quote
+// rule matches what fish actually interprets.
+func TestShellResolveDirFishModeLiveFishParses(t *testing.T) {
+	if _, err := exec.LookPath("fish"); err != nil {
+		t.Skip("fish not available")
+	}
+	root := setupCLI(t)
+	// Use a dir name with fish-hostile metacharacters. Backslash and
+	// single quote are the only two bytes fish single-quoting handles
+	// specially; $ and backticks pass through literally (unlike POSIX).
+	ugly := `it's \weird \path`
+	repo := filepath.Join(root, ugly)
+	marker := filepath.Join(repo, ".claude-profile")
+	writeMarker(t, marker, "work\n")
+
+	p, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveMarker(t, p, marker)
+
+	out, _, err := runCLI(t, "", "shell-resolve-dir", "--shell=fish", repo)
+	if err != nil {
+		t.Fatalf("shell-resolve-dir: %v\n%s", err, out)
+	}
+	script := out + "\necho $CCP_AUTO_MARKER\n"
+	cmd := exec.Command("fish", "-c", script)
+	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/local/bin"}
+	fishOut, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish eval of emitted output failed: %v\nemitted:\n%s\nfish out:\n%s",
+			err, out, fishOut)
+	}
+	got := strings.TrimSpace(string(fishOut))
+	if got != marker {
+		t.Errorf("fish-eval'd CCP_AUTO_MARKER = %q, want %q\nemitted:\n%s", got, marker, out)
+	}
+}
+
+// TestFishQuoteRoundTrip is a table-driven corpus piped through fish
+// itself. Mirrors TestShellQuoteCorpus for the fish emission path. If
+// fish is not on PATH, skip — this is an integration test.
+func TestFishQuoteRoundTrip(t *testing.T) {
+	if _, err := exec.LookPath("fish"); err != nil {
+		t.Skip("fish not available")
+	}
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"empty", ""},
+		{"plain ascii", "hello"},
+		{"space", "hello world"},
+		{"single quote", "it's"},
+		{"double single quote", "''"},
+		{"backslash", `back\slash`},
+		{"double backslash", `\\`},
+		// fish single-quote-escape rule: $ and backticks are literal
+		// inside single quotes, so these need no special treatment.
+		{"dollar variable", "$HOME"},
+		{"backtick", "`date`"},
+		{"newline", "line1\nline2"},
+		{"double quote", `say "hi"`},
+		{"parens", "(subshell)"},
+		{"everything fish-special", `' \ ' \ `},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			quoted := fishQuote(tc.in)
+			script := "set -x VAR " + quoted + "\nprintf '%s\\x00' $VAR\n"
+			cmd := exec.Command("fish", "-c", script)
+			cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/local/bin"}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("fish eval of %q (quoted: %s) failed: %v\n%s",
+					tc.in, quoted, err, out)
+			}
+			got := strings.TrimSuffix(string(out), "\x00")
+			if got != tc.in {
+				t.Errorf("round trip failed\ninput:    %q\nquoted:   %s\nroundtrip: %q",
+					tc.in, quoted, got)
+			}
+		})
+	}
+}
+
+// TestFishQuoteFixedExamples pins known encodings of selected inputs
+// so a future refactor can't silently change the representation.
+func TestFishQuoteFixedExamples(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "''"},
+		{"abc", "'abc'"},
+		{"it's", `'it\'s'`},
+		// Backslash escaping: input `\` becomes `\\` inside the quotes.
+		{`\`, `'\\'`},
+		{`\'`, `'\\\''`},
+		// `$` and backtick are literal inside fish single quotes.
+		{"$HOME", "'$HOME'"},
+		{"`date`", "'`date`'"},
+	}
+	for _, tc := range cases {
+		got := fishQuote(tc.in)
+		if got != tc.want {
+			t.Errorf("fishQuote(%q) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestShellResolveDirUnknownShellIsSilent: invoking with an unrecognized
+// --shell value must fail closed (empty stdout, exit 0) per the
+// hot-path always-silent invariant.
+func TestShellResolveDirUnknownShellIsSilent(t *testing.T) {
+	root := setupCLI(t)
+	repo := filepath.Join(root, "repo")
+	marker := filepath.Join(repo, ".claude-profile")
+	writeMarker(t, marker, "work\n")
+	p, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	approveMarker(t, p, marker)
+
+	out, _, err := runCLI(t, "", "shell-resolve-dir", "--shell=powershell", repo)
+	if err != nil {
+		t.Fatalf("shell-resolve-dir --shell=powershell: %v", err)
+	}
+	if out != "" {
+		t.Errorf("unknown shell must emit empty stdout, got %q", out)
+	}
+}
+
 // TestShellResolveDirNoStderrEverEmitted asserts the always-silent-stderr
 // invariant. A hot-path command must never print to stderr — the shell
 // hook can't safely pipe it anywhere.

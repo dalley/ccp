@@ -598,6 +598,94 @@ func TestShellInitFishSnippetParses(t *testing.T) {
 	}
 }
 
+// TestShellInitFishAutoActivateAllowedMarker is the fish counterpart to
+// TestShellInitPosixActuallyRunsInSh and TestShellInitAutoActivateAllowedMarker.
+// It stands up a hermetic env with a real ccp binary, seeds an approved
+// marker, sources the fish snippet in a real fish shell, and verifies
+// that CCP_AUTO_PROFILE / CCP_AUTO_MARKER / CLAUDE_CONFIG_DIR get set.
+//
+// Before the --shell=fish flag was added to `ccp shell-resolve-dir`, fish
+// could never eval the POSIX `VAR='value'` output, so this test (had it
+// existed) would have been silently broken. Keep it green as regression
+// protection for the fish auto-activation path.
+func TestShellInitFishAutoActivateAllowedMarker(t *testing.T) {
+	if _, err := exec.LookPath("fish"); err != nil {
+		t.Skip("fish not available")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not available to build ccp")
+	}
+	// Piggyback on the POSIX scenario plumbing (build ccp once, hermetic
+	// HOME/CCP_ROOT, pathDir with a ccp symlink), but generate a fish
+	// snippet instead of a POSIX one.
+	ccpBin := buildRealCCP(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	ccpRoot := filepath.Join(root, "ccproot")
+	pathDir := filepath.Join(root, "bin")
+	for _, d := range []string{home, ccpRoot, pathDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(ccpBin, filepath.Join(pathDir, "ccp")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("CCP_ROOT", ccpRoot)
+	p, _ := paths.Resolve()
+	var buf bytes.Buffer
+	if err := writeShellInit(&buf, "fish", p); err != nil {
+		t.Fatal(err)
+	}
+	snippetPath := filepath.Join(root, "snippet.fish")
+	if err := os.WriteFile(snippetPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed + approve marker.
+	repo := filepath.Join(home, "work-repo")
+	marker := filepath.Join(repo, ".claude-profile")
+	sub := filepath.Join(repo, "sub", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	approveMarkerFile(t, p, marker)
+
+	// fish needs `cd`, the snippet source, and the PWD-change hook to
+	// fire; we call __ccp_activate directly after cd so we don't depend
+	// on fish's event-dispatch timing from within `-c`.
+	script := "cd " + sub + "\n" +
+		"source " + snippetPath + "\n" +
+		"__ccp_activate\n" +
+		"echo CONFIG=$CLAUDE_CONFIG_DIR\n" +
+		"echo MARKER=$CCP_AUTO_MARKER\n" +
+		"echo MPROF=$CCP_AUTO_PROFILE\n"
+	cmd := exec.Command("fish", "-c", script)
+	cmd.Env = []string{
+		"HOME=" + home,
+		"CCP_ROOT=" + ccpRoot,
+		"PATH=" + pathDir + ":/usr/bin:/bin:/usr/local/bin",
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fish script failed: %v\n%s", err, out)
+	}
+	got := string(out)
+	if want := "CONFIG=" + home + "/.claude-work"; !strings.Contains(got, want) {
+		t.Errorf("missing %q in fish output:\n%s", want, got)
+	}
+	if !strings.Contains(got, "MARKER="+marker) {
+		t.Errorf("missing MARKER=%s in fish output:\n%s", marker, got)
+	}
+	if !strings.Contains(got, "MPROF=work") {
+		t.Errorf("missing MPROF=work in fish output:\n%s", got)
+	}
+}
+
 // itoaUnix renders an int64 unix time as decimal without importing strconv.
 func itoaUnix(n int64) string {
 	if n == 0 {
