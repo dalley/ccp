@@ -253,7 +253,13 @@ function __ccp_activate
   end
   if test -z "$marker"
     if set -q CCP_AUTO_NOMARKER_ROOT; and test -n "$CCP_AUTO_NOMARKER_ROOT"
-      if test "$CCP_AUTO_NOMARKER_ROOT" = "$PWD"; or string match -q "$PWD/*" -- "$CCP_AUTO_NOMARKER_ROOT"
+      # Mirror the POSIX form: case "$PWD" in "$CCP_AUTO_NOMARKER_ROOT"/*)…
+      # — i.e. $PWD matches the pattern "<cache>/*" (PWD is at or below
+      # the cached no-marker directory). string match's arg order is
+      # (pattern, string); the previous inversion made the test fail
+      # except at exact equality, nullifying the negative cache on
+      # descents into the same tree.
+      if test "$CCP_AUTO_NOMARKER_ROOT" = "$PWD"; or string match -q -- "$CCP_AUTO_NOMARKER_ROOT/*" "$PWD"
         __ccp_activate_legacy
         return
       end

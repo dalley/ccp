@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/dalley/ccp/internal/profile"
@@ -40,12 +41,31 @@ func newSecretRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Peek before mutating so we can emit a differentiated
+			// message ("Removed" vs "No secret stored"). Mirrors the
+			// ccp deny pattern in allow.go. The peek is lock-free: a
+			// concurrent writer could change the state between peek and
+			// Delete, but Delete is idempotent so the end state is the
+			// same — worst case the message is slightly stale.
+			_, peekErr := secret.Get(s.Paths, prof, key)
+			existed := peekErr == nil
+			// If Get returned anything other than a clean hit or
+			// ErrSecretNotFound, surface the error rather than trying
+			// to Delete under an unknown backend state (e.g. keychain
+			// locked — user needs to unlock, not blunder on).
+			if !existed && !errors.Is(peekErr, secret.ErrSecretNotFound) {
+				return peekErr
+			}
 			if err := withLockedState(s.Paths, func(s *state) error {
 				return secret.Delete(s.Paths, prof, key)
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed secret %s/%s\n", prof, key)
+			if existed {
+				fmt.Fprintf(cmd.OutOrStdout(), "Removed secret %s/%s\n", prof, key)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "No secret %s/%s stored\n", prof, key)
+			}
 			return nil
 		},
 	}

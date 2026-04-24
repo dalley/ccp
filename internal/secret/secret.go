@@ -260,10 +260,13 @@ func Get(p paths.Paths, prof, key string) (string, error) {
 		}
 		return "", ferr
 	case stateOther:
-		// Surface the underlying keyring error so diagnostics don't swallow
-		// a broken backend silently, but still attempt the file store —
-		// the user may have populated it explicitly.
-		fmt.Fprintf(os.Stderr, "ccp: keychain read failed (%s); trying file store\n", err)
+		// Route through emitFallbackWarn so SetFallbackWarnWriter tests
+		// can suppress the noise — identical discipline to Set's
+		// stateOther branch. Dumping directly to os.Stderr here used to
+		// bypass the test hook entirely. We still surface the underlying
+		// keyring error (via the shared helper's message) so diagnostics
+		// don't swallow a broken backend silently.
+		emitFallbackWarn(p.SecretFilePath(prof), err)
 		v, ferr := fileGet(p, prof, key)
 		if ferr == nil {
 			return v, nil

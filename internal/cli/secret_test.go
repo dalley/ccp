@@ -230,6 +230,44 @@ func TestSecretRmIdempotent(t *testing.T) {
 	}
 }
 
+// TestSecretRmDifferentiatedOutput confirms the peek-then-delete pattern
+// emits "Removed X/Y" when a secret existed and "No secret X/Y stored"
+// when it didn't — mirrors ccp deny's "Revoked X" vs "No entry to
+// revoke for X" UX. Before the change, every rm unconditionally
+// printed "Removed …" even when the key had never been stored,
+// leading to spooky "removed something that never existed" output in
+// scripts running rm defensively.
+func TestSecretRmDifferentiatedOutput(t *testing.T) {
+	setupSecretCLI(t)
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatal(err)
+	}
+
+	// rm on a nonexistent key — should print the "not stored" line.
+	out, _, err := runCLI(t, "", "secret", "rm", "work", "NEVER_EXISTED")
+	if err != nil {
+		t.Fatalf("rm nonexistent: %v", err)
+	}
+	if !strings.Contains(out, "No secret work/NEVER_EXISTED stored") {
+		t.Errorf("nonexistent-key output mismatch: %q", out)
+	}
+	if strings.Contains(out, "Removed secret") {
+		t.Errorf("output should not claim removal of a nonexistent key: %q", out)
+	}
+
+	// Now set a real one and rm it — should print "Removed".
+	if _, _, err := runCLI(t, "", "secret", "set", "work", "REAL", "v"); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = runCLI(t, "", "secret", "rm", "work", "REAL")
+	if err != nil {
+		t.Fatalf("rm existing: %v", err)
+	}
+	if !strings.Contains(out, "Removed secret work/REAL") {
+		t.Errorf("existing-key output mismatch: %q", out)
+	}
+}
+
 // ---------- edge / error cases ----------
 
 func TestSecretSetNonTTYWithoutSourceRefuses(t *testing.T) {
