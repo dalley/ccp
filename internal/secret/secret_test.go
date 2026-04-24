@@ -242,6 +242,49 @@ func TestGetFallsBackWhenKeychainUnavailable(t *testing.T) {
 	}
 }
 
+// TestSetScrubsStaleFileEntryOnKeychainRestore exercises the three-step
+// keychain→file→keychain staleness scenario. Without the fileDelete in Set's
+// stateOK branch, a later unavailability would expose the stale V1 file
+// entry instead of returning ErrSecretNotFound.
+func TestSetScrubsStaleFileEntryOnKeychainRestore(t *testing.T) {
+	p := newPaths(t)
+
+	// 1. Keychain unavailable → Set V1 lands in the file store.
+	keyring.MockInitWithError(errors.New("dbus: no such interface"))
+	resetFallbackWarnOnce()
+	SetFallbackWarnWriter(io.Discard)
+	t.Cleanup(func() { SetFallbackWarnWriter(os.Stderr) })
+	if err := Set(p, "work", "KEY", "V1"); err != nil {
+		t.Fatalf("Set V1 (fallback): %v", err)
+	}
+	// Confirm the file has V1.
+	if got, err := fileGet(p, "work", "KEY"); err != nil || got != "V1" {
+		t.Fatalf("file store post-V1: got=%q err=%v, want V1", got, err)
+	}
+
+	// 2. Keychain comes back → Set V2 should land in the keychain AND
+	// scrub the stale V1 file entry.
+	keyring.MockInit()
+	if err := Set(p, "work", "KEY", "V2"); err != nil {
+		t.Fatalf("Set V2 (keychain): %v", err)
+	}
+	// File store must no longer contain KEY.
+	if _, err := fileGet(p, "work", "KEY"); !errors.Is(err, ErrSecretNotFound) {
+		t.Errorf("file store post-V2: err=%v, want ErrSecretNotFound (stale V1 not scrubbed)", err)
+	}
+
+	// 3. Keychain goes away again → Get must now return ErrSecretNotFound
+	// (the stale V1 is gone), NOT V1.
+	keyring.MockInitWithError(errors.New("dbus: no such interface"))
+	got, err := Get(p, "work", "KEY")
+	if !errors.Is(err, ErrSecretNotFound) {
+		t.Errorf("Get post-unavailable: got=%q err=%v, want ErrSecretNotFound", got, err)
+	}
+	if got == "V1" {
+		t.Errorf("Get returned stale V1 after keychain restore")
+	}
+}
+
 // ---------- locked keychain ----------
 
 func TestSetReturnsLockedWithoutFallback(t *testing.T) {
@@ -476,6 +519,17 @@ func TestClassifyKeyringErr(t *testing.T) {
 		{"wrapped ErrNotFound", errors.Join(errors.New("outer"), keyring.ErrNotFound), stateNotFound},
 		{"locked string", errors.New("SecKeychainItemCopyContent: keychain is locked"), stateLocked},
 		{"authentication string", errors.New("The authentication prompt was cancelled"), stateLocked},
+		// macOS `security unlock-keychain -i` failure: the exact literal
+		// surfaced by go-keyring when the keychain is locked and the
+		// shelled-out security(1) binary refuses the empty passphrase.
+		{"passphrase literal", errors.New("The user name or passphrase you entered is not correct"), stateLocked},
+		// Linux Secret Service locked-collection error.
+		{"failed to unlock", errors.New("failed to unlock correct collection"), stateLocked},
+		// macOS fallback: `exec: security` fails with a non-descriptive
+		// exit-status wrapper. We want this to be treated as locked rather
+		// than swallowed as stateOther (which would silently fall back to
+		// the file store).
+		{"exit status security", errors.New("exec: security: exit status 36"), stateLocked},
 		{"dbus", errors.New("dbus: connection refused"), stateUnavailable},
 		{"no such interface", errors.New("org.freedesktop.DBus.Error.ServiceUnknown: no such interface"), stateUnavailable},
 		{"secret service not available", errors.New("secret service not available"), stateUnavailable},

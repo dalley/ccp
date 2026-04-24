@@ -22,12 +22,6 @@ var ErrSecretNotFound = errors.New("secret not found")
 // locked keychain as a missing key.
 var ErrKeychainLocked = errors.New("keychain is locked; unlock and retry")
 
-// ErrKeychainUnavailable is returned by Set when no keychain backend is
-// reachable (headless Linux with no D-Bus, devcontainer, etc.). Internally
-// this error triggers the file-fallback write path; callers rarely see it
-// directly. Maps to ExitState if it ever leaks.
-var ErrKeychainUnavailable = errors.New("OS keychain not available")
-
 // ErrUnsupportedPlatform is returned from the Windows stubs of this
 // package. The CLI layer hides `ccp secret` commands on Windows so users
 // should never see this directly — it exists as defence-in-depth for

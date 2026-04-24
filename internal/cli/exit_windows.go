@@ -37,7 +37,6 @@ func ExitCodeFor(err error) int {
 	case errors.Is(err, secret.ErrSecretNotFound):
 		return ExitUser
 	case errors.Is(err, secret.ErrKeychainLocked),
-		errors.Is(err, secret.ErrKeychainUnavailable),
 		errors.Is(err, secret.ErrUnsupportedPlatform):
 		return ExitState
 	case errors.Is(err, refs.ErrSecretRefUnresolved),

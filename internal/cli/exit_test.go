@@ -26,7 +26,6 @@ func TestExitCodeForSentinels(t *testing.T) {
 		{fmt.Errorf("audit: %w", profile.ErrAuditSecretsDetected), ExitConflict},
 		{secret.ErrSecretNotFound, ExitUser},
 		{secret.ErrKeychainLocked, ExitState},
-		{secret.ErrKeychainUnavailable, ExitState},
 		{secret.ErrUnsupportedPlatform, ExitState},
 		{fmt.Errorf("get: %w", secret.ErrSecretNotFound), ExitUser},
 		{refs.ErrSecretRefUnresolved, ExitState},

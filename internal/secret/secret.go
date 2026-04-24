@@ -106,9 +106,18 @@ const (
 //
 // Matching rules (documented in the Unit 3 spec):
 //   - errors.Is(err, keyring.ErrNotFound) → stateNotFound.
-//   - String match "locked" / "authentication" → stateLocked (macOS locked
-//     keychain; "authentication" catches Secret Service's "org.freedesktop.
-//     DBus.Error.AuthFailed").
+//   - String matches that classify as stateLocked (tested in order):
+//   - "locked" — the canonical macOS/Linux locked-keychain marker.
+//   - "authentication" — Secret Service's
+//     "org.freedesktop.DBus.Error.AuthFailed" and similar.
+//   - "passphrase" — go-keyring shells out to `security unlock-keychain`
+//     on macOS, whose locked-keychain failure reads
+//     "The user name or passphrase you entered is not correct".
+//   - "failed to unlock" — the Linux Secret Service "failed to unlock
+//     correct collection" error for a locked collection.
+//   - "exit status" AND "security" — conservative macOS fallback for
+//     other `security`-command failures that indicate an access-refused
+//     state rather than a missing backend.
 //   - String match "no such interface" / "dbus" / "secret service" →
 //     stateUnavailable (headless Linux without a running Secret Service).
 //   - Anything else → stateOther. Callers treat this like stateUnavailable
@@ -122,7 +131,11 @@ func classifyKeyringErr(err error) keychainState {
 	}
 	s := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(s, "locked") || strings.Contains(s, "authentication"):
+	case strings.Contains(s, "locked"),
+		strings.Contains(s, "authentication"),
+		strings.Contains(s, "passphrase"),
+		strings.Contains(s, "failed to unlock"),
+		strings.Contains(s, "exit status") && strings.Contains(s, "security"):
 		return stateLocked
 	case strings.Contains(s, "no such interface"),
 		strings.Contains(s, "dbus"),
@@ -203,6 +216,15 @@ func Set(p paths.Paths, prof, key, value string) error {
 	err := keyring.Set(service, account(prof, key), value)
 	switch classifyKeyringErr(err) {
 	case stateOK:
+		// Scrub any stale file-fallback entry for the same key. Scenario:
+		// keychain was unavailable, we wrote V1 to the file store; then
+		// the backend came back and we're now storing V2 in the keychain.
+		// If we leave the file V1 in place, a later unavailability would
+		// make Get return the stale V1. fileDelete is idempotent — missing
+		// file or missing key is not an error.
+		if derr := fileDelete(p, prof, key); derr != nil {
+			return fmt.Errorf("scrub stale file-store entry for %s/%s: %w", prof, key, derr)
+		}
 		// Record the key in the keychain index so List can enumerate.
 		return indexAdd(p, prof, key)
 	case stateNotFound:
