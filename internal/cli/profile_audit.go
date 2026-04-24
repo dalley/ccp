@@ -15,8 +15,17 @@ import (
 func newProfileAuditCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:               "audit <name>",
-		Short:             "Scan a profile for suspected secrets",
+		Use:   "audit <name>",
+		Short: "Scan a profile for suspected secrets",
+		Long: "Walks the profile's source tree and reports files matching regex " +
+			"or Shannon-entropy signatures for API tokens, private keys, and other " +
+			"credential-shaped content. Exits 4 when real findings exist so CI " +
+			"pipelines can gate on the result; informational 'skipped-*' entries " +
+			"(unreadable/binary/too-large files) never trigger a non-zero exit.",
+		Example: "  # human-readable audit of the 'work' profile\n" +
+			"  ccp profile audit work\n\n" +
+			"  # structured JSON for scripting\n" +
+			"  ccp profile audit work --json",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

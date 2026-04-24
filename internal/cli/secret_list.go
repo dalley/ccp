@@ -22,8 +22,17 @@ import (
 func newSecretListCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:               "list <profile>",
-		Short:             "List the secret keys stored for <profile>",
+		Use:   "list <profile>",
+		Short: "List the secret keys stored for <profile>",
+		Long: "Lists secret keys stored for <profile>, merging the keychain-index " +
+			"and the file-fallback store. Default output is one key per line, " +
+			"sorted alphabetically. --json emits {\"profile\":\"<name>\", \"keys\":[...]} " +
+			"— the object-with-keys shape (not a bare array) leaves room for future " +
+			"per-key metadata without breaking parse compat.",
+		Example: "  # one key per line\n" +
+			"  ccp secret list work\n\n" +
+			"  # structured output for scripting\n" +
+			"  ccp secret list work --json",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

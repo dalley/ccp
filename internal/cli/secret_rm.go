@@ -24,8 +24,17 @@ import (
 // files. Same discipline as `secret set`.
 func newSecretRmCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "rm <profile> <key>",
-		Short:             "Remove the stored secret for <profile>/<key> (idempotent)",
+		Use:   "rm <profile> <key>",
+		Short: "Remove the stored secret for <profile>/<key> (idempotent)",
+		Long: "Removes the secret for <profile>/<key> from both the keychain and the " +
+			"file-fallback store. Idempotent: removing a nonexistent key succeeds " +
+			"silently with a 'no secret stored' message. No confirmation prompt — " +
+			"removal from the keychain is low-stakes (re-set is cheap). A locked " +
+			"keychain returns a typed error rather than skipping the backend.",
+		Example: "  # remove a single key\n" +
+			"  ccp secret rm work API_KEY\n\n" +
+			"  # safe to run against a key that was never set\n" +
+			"  ccp secret rm work MAYBE_SET",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

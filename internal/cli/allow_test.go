@@ -475,6 +475,82 @@ func TestAllowRejectsJSONWithoutStatus(t *testing.T) {
 	}
 }
 
+// TestDenyJSONRevokedAndNoEntry covers the --json emission in both
+// states the command can land in: an entry existed (status:"revoked")
+// and an entry did not exist (status:"no_entry"). Both exit 0 — deny is
+// idempotent by contract.
+func TestDenyJSONRevokedAndNoEntry(t *testing.T) {
+	root := setupCLI(t)
+	repo := filepath.Join(root, "repo")
+	marker := filepath.Join(repo, ".claude-profile")
+	writeMarkerAllow(t, marker, "work\n")
+	chdirTo(t, repo)
+
+	// Approve first so the first deny revokes a real entry.
+	if _, _, err := runCLI(t, "", "allow"); err != nil {
+		t.Fatalf("allow: %v", err)
+	}
+
+	out, _, err := runCLI(t, "", "deny", "--json")
+	if err != nil {
+		t.Fatalf("deny --json: %v\n%s", err, out)
+	}
+	r := decodeDeny(t, out)
+	if r.Status != "revoked" {
+		t.Errorf("status = %q, want revoked", r.Status)
+	}
+	if r.Marker != marker {
+		t.Errorf("marker = %q, want %q", r.Marker, marker)
+	}
+
+	// Second deny: entry already removed — status must be no_entry, exit 0.
+	out, _, err = runCLI(t, "", "deny", "--json")
+	if err != nil {
+		t.Fatalf("deny --json (no_entry case): %v\n%s", err, out)
+	}
+	r = decodeDeny(t, out)
+	if r.Status != "no_entry" {
+		t.Errorf("status = %q, want no_entry", r.Status)
+	}
+	if r.Marker != marker {
+		t.Errorf("marker = %q, want %q", r.Marker, marker)
+	}
+}
+
+// TestDenyJSONNoMarker: no marker anywhere up the walk → --json still
+// emits well-formed output so scripts can branch on Status without
+// special-casing exit 0 + empty stdout.
+func TestDenyJSONNoMarker(t *testing.T) {
+	root := setupCLI(t)
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdirTo(t, repo)
+
+	out, _, err := runCLI(t, "", "deny", "--json")
+	if err != nil {
+		t.Fatalf("deny --json (no marker): %v\n%s", err, out)
+	}
+	r := decodeDeny(t, out)
+	if r.Status != "no_marker" {
+		t.Errorf("status = %q, want no_marker", r.Status)
+	}
+	if r.Marker != "" {
+		t.Errorf("marker = %q, want empty", r.Marker)
+	}
+}
+
+// decodeDeny parses the --json emission of `ccp deny`.
+func decodeDeny(t *testing.T, out string) denyReport {
+	t.Helper()
+	var r denyReport
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("json decode failed: %v\nbody: %q", err, out)
+	}
+	return r
+}
+
 // decodeStatus parses the --json emission of `ccp allow --status`.
 // Extracted as a helper so test bodies stay focused on assertions.
 func decodeStatus(t *testing.T, out string) statusReport {

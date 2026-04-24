@@ -51,8 +51,22 @@ func newProfileExportCmd() *cobra.Command {
 		skipAudit      bool
 	)
 	cmd := &cobra.Command{
-		Use:               "export <name>",
-		Short:             "Export a profile as a portable tar archive",
+		Use:   "export <name>",
+		Short: "Export a profile as a portable tar archive",
+		Long: "Writes a tar of the profile's source tree to stdout or the path given " +
+			"by -o. By default, `{{ ref }}` tokens travel verbatim and the per-profile " +
+			"secrets file is omitted so the tarball is safe to share. " +
+			"--include-secrets resolves refs inline and embeds the secrets file; that " +
+			"mode requires a TTY confirmation, or --yes-really in automation. " +
+			"The audit scan runs ADVISORY by default (prints a hint to stderr); " +
+			"--fail-on-audit turns it into a hard gate that aborts the export on " +
+			"any real finding.",
+		Example: "  # portable tarball to stdout (refs stay verbatim)\n" +
+			"  ccp profile export work -o work.tar\n\n" +
+			"  # inline-resolve secrets (non-interactive contexts need --yes-really)\n" +
+			"  ccp profile export work --include-secrets --yes-really -o work-full.tar\n\n" +
+			"  # refuse export if the audit finds suspected secrets\n" +
+			"  ccp profile export work --fail-on-audit -o work.tar",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

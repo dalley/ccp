@@ -24,8 +24,18 @@ import (
 // ("pure file I/O + keyring calls; does NOT take the ccp state lock").
 func newSecretGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "get <profile> <key>",
-		Short:             "Print the stored value for <profile>/<key> (no trailing newline)",
+		Use:   "get <profile> <key>",
+		Short: "Print the stored value for <profile>/<key> (no trailing newline)",
+		Long: "Prints the stored value for <profile>/<key> to stdout with NO trailing " +
+			"newline, so `TOKEN=$(ccp secret get work API_KEY)` and `read -r` variants " +
+			"both capture the value exactly as stored. The keychain is consulted " +
+			"first; on keychain-unavailable or keychain-not-found we fall through " +
+			"to the per-profile file store. A locked keychain returns a typed error " +
+			"rather than silently falling through.",
+		Example: "  # consume in a shell subshell\n" +
+			"  TOKEN=$(ccp secret get work API_KEY)\n\n" +
+			"  # pipe through another process\n" +
+			"  ccp secret get work API_KEY | some-tool --token-stdin",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

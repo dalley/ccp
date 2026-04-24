@@ -46,8 +46,19 @@ func newSecretSetCmd() *cobra.Command {
 		readStdin bool
 	)
 	cmd := &cobra.Command{
-		Use:               "set <profile> <key> [value]",
-		Short:             "Store a secret value for <profile>/<key>",
+		Use:   "set <profile> <key> [value]",
+		Short: "Store a secret value for <profile>/<key>",
+		Long: "Stores a value under <profile>/<key> in the OS keychain (file-fallback " +
+			"on headless systems). Value source precedence: positional > --value > " +
+			"--stdin > interactive TTY prompt. Non-TTY contexts with no source refuse " +
+			"loudly. --stdin strips exactly one trailing newline so `echo $SECRET | " +
+			"ccp secret set ...` stores $SECRET unchanged.",
+		Example: "  # interactive TTY prompt (echo disabled)\n" +
+			"  ccp secret set work API_KEY\n\n" +
+			"  # explicit flag (exposed in process listing)\n" +
+			"  ccp secret set work API_KEY --value s3cret\n\n" +
+			"  # pipe from a file or another command\n" +
+			"  pass show work/api | ccp secret set work API_KEY --stdin",
 		Args:              cobra.RangeArgs(2, 3),
 		ValidArgsFunction: completeProfileName,
 		RunE: func(cmd *cobra.Command, args []string) error {

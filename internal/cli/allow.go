@@ -61,7 +61,14 @@ func newAllowCmd() *cobra.Command {
 		Long: "Walks up from $PWD looking for a .claude-profile file. Without flags, " +
 			"records the file's content hash in the per-machine allow-list so " +
 			"auto-activation will honour it. With --status, reports whether the " +
-			"nearest marker is allowed, unallowed, or has drifted since approval.",
+			"nearest marker is allowed, unallowed, or has drifted since approval; " +
+			"--status is read-only and does not take the state lock.",
+		Example: "  # approve the nearest marker in this project\n" +
+			"  ccp allow\n\n" +
+			"  # check status without mutating the allow-list\n" +
+			"  ccp allow --status\n\n" +
+			"  # scripted status check with JSON output\n" +
+			"  ccp allow --status --json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status {
@@ -81,22 +88,34 @@ func newAllowCmd() *cobra.Command {
 	return cmd
 }
 
-// newDenyCmd wires `ccp deny`: walk up from $PWD, revoke the entry for the
-// nearest `.claude-profile` if one exists. Idempotent — revoking a marker
-// that was never approved succeeds silently. Takes the global flock because
-// revocation is a state mutation.
+// newDenyCmd wires `ccp deny [--json]`: walk up from $PWD, revoke the entry
+// for the nearest `.claude-profile` if one exists. Idempotent — revoking a
+// marker that was never approved succeeds silently. Takes the global flock
+// because revocation is a state mutation.
+//
+// `--json` emits {"marker":"<path>","status":"revoked"|"no_entry"} on
+// stdout. Exit code stays 0 for both cases (consistent with the command's
+// idempotent semantics).
 func newDenyCmd() *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "deny",
 		Short: "Revoke approval for the nearest .claude-profile marker",
 		Long: "Walks up from $PWD looking for a .claude-profile file. If found, " +
 			"removes the matching entry from the allow-list. Idempotent: running " +
-			"against an already-unapproved marker is a no-op.",
+			"against an already-unapproved marker is a no-op. With --json, emits " +
+			`{"marker":"<path>","status":"revoked"|"no_entry"} for scripting.`,
+		Example: "  # revoke approval for the marker at or above the current directory\n" +
+			"  ccp deny\n\n" +
+			"  # scripted revocation with machine-readable output\n" +
+			"  ccp deny --json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runDeny(cmd)
+			return runDeny(cmd, asJSON)
 		},
 	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, `emit {"marker":..., "status":...} on stdout`)
+	return cmd
 }
 
 // findNearestMarker resolves CWD and walks up for a marker. Returns:
@@ -283,8 +302,8 @@ func runAllowStatus(cmd *cobra.Command, asJSON bool) error {
 	}
 }
 
-// runDeny implements `ccp deny`.
-func runDeny(cmd *cobra.Command) error {
+// runDeny implements `ccp deny [--json]`.
+func runDeny(cmd *cobra.Command, asJSON bool) error {
 	s, err := loadState()
 	if err != nil {
 		return err
@@ -295,6 +314,9 @@ func runDeny(cmd *cobra.Command) error {
 	}
 	out := cmd.OutOrStdout()
 	if markerPath == "" {
+		if asJSON {
+			return writeDenyJSON(out, denyReport{Status: "no_marker"})
+		}
 		fmt.Fprintf(out, "No .claude-profile found in any ancestor of %s\n", cwd)
 		return nil
 	}
@@ -321,12 +343,36 @@ func runDeny(cmd *cobra.Command) error {
 		return err
 	}
 
+	status := "no_entry"
+	if existed {
+		status = "revoked"
+	}
+	if asJSON {
+		return writeDenyJSON(out, denyReport{
+			Marker: markerPath,
+			Status: status,
+		})
+	}
 	if existed {
 		fmt.Fprintf(out, "Revoked %s\n", markerPath)
 	} else {
 		fmt.Fprintf(out, "No entry to revoke for %s\n", markerPath)
 	}
 	return nil
+}
+
+// denyReport is the --json payload shape for `ccp deny`. Fields are
+// load-bearing — scripts parse these. Marker is omitempty so the
+// no-marker-found case emits a minimal payload just like allow --status.
+type denyReport struct {
+	Marker string `json:"marker,omitempty"`
+	Status string `json:"status"`
+}
+
+func writeDenyJSON(out io.Writer, r denyReport) error {
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r)
 }
 
 // statusReport is the --json payload shape for `ccp allow --status`.
