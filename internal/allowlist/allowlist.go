@@ -27,6 +27,7 @@ package allowlist
 //      concurrency discipline lives at the edge.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -277,12 +278,12 @@ func validateMarkerBytes(b []byte) (string, error) {
 	}
 
 	// No second newline allowed anywhere in body (strict single line).
-	if i := indexByte(body, '\n'); i >= 0 {
+	if i := bytes.IndexByte(body, '\n'); i >= 0 {
 		return "", fmt.Errorf("%w: unexpected newline at byte offset %d (marker must be a single line)",
 			ErrInvalidMarker, i)
 	}
 	// No carriage return anywhere (catches CRLF line endings specifically).
-	if i := indexByte(body, '\r'); i >= 0 {
+	if i := bytes.IndexByte(body, '\r'); i >= 0 {
 		return "", fmt.Errorf("%w: carriage return at byte offset %d (use LF line endings, not CRLF)",
 			ErrInvalidMarker, i)
 	}
@@ -345,17 +346,6 @@ func byteAt(b []byte, off int) byte {
 		return 0
 	}
 	return b[off]
-}
-
-// indexByte is a tiny inline of bytes.IndexByte to avoid the import cycle
-// headache in cramped review contexts.
-func indexByte(b []byte, c byte) int {
-	for i, x := range b {
-		if x == c {
-			return i
-		}
-	}
-	return -1
 }
 
 // openNoFollow opens path with O_RDONLY|O_NOFOLLOW. On Linux and macOS,

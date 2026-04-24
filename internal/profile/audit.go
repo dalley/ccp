@@ -332,14 +332,15 @@ func auditFile(profileName, absPath, relPath string) ([]AuditFinding, error) {
 		// Entropy pass: iterate all qualifying runs.
 		for _, loc := range entropyRunRe.FindAllStringIndex(line, -1) {
 			sub := line[loc[0]:loc[1]]
-			if !entropyCharsetOK(sub) {
+			ok, isHex := entropyCharsetOK(sub)
+			if !ok {
 				continue
 			}
 			if len(sub) < auditMinEntropyLen {
 				continue
 			}
 			threshold := auditEntropyThreshold
-			if hexOnlyRe.MatchString(sub) {
+			if isHex {
 				threshold = auditEntropyThresholdHex
 			}
 			if shannonEntropy(sub) < threshold {
@@ -364,14 +365,20 @@ func auditFile(profileName, absPath, relPath string) ([]AuditFinding, error) {
 // (letters + digits + `+/=_-`). entropyRunRe already filters to the
 // base64-ish charset, so this function is mostly confirming the "hex
 // sub-case" and rejecting mixed runs that slipped through.
-func entropyCharsetOK(s string) bool {
+//
+// Returns (ok, isHex). The isHex bit lets the caller pick between the
+// hex-specific threshold and the general base64 threshold WITHOUT
+// re-running hexOnlyRe.MatchString at the call site — saving one regex
+// match per candidate run, which matters on large files with many
+// hash-like strings.
+func entropyCharsetOK(s string) (ok bool, isHex bool) {
 	// The run regex already restricts to base64-ish characters, so
 	// this function's main job is to accept the hex sub-case AND to
 	// reject obvious non-secrets like long ASCII words (which the run
 	// regex would also pass). We accept if the string looks like hex
 	// OR if it contains at least one digit (real base64 secrets do).
 	if hexOnlyRe.MatchString(s) {
-		return true
+		return true, true
 	}
 	hasDigit := false
 	for i := 0; i < len(s); i++ {
@@ -385,7 +392,7 @@ func entropyCharsetOK(s string) bool {
 	// score high entropy if the letters varied; rejecting the
 	// no-digit case cuts false positives on long dictionary words
 	// and template placeholders.
-	return hasDigit
+	return hasDigit, false
 }
 
 // shannonEntropy computes H(X) in bits-per-char over the given string.

@@ -264,6 +264,7 @@ type exportEntry struct {
 	rel       string      // slash-normalized relative path (tar convention)
 	mode      os.FileMode // perm bits only
 	size      int64       // used for the tar header when not re-rendered
+	mtime     time.Time   // captured at walk time (UTC) so tar headers are deterministic without an extra per-write Stat
 	isRegular bool        // false for directories (which we encode as header-only entries) and symlinks
 	isSymlink bool
 	linkTo    string // relative, in-tree symlink target
@@ -296,6 +297,13 @@ func collectExportEntries(src string) ([]exportEntry, error) {
 			return ierr
 		}
 
+		// Capture mtime at walk time and normalize to UTC immediately.
+		// Previously we statted each entry again at write time — that
+		// was both a gratuitous syscall AND a race window (an extract-
+		// and-edit-during-export cycle would land an inconsistent
+		// mtime in the tar). Walk-time capture pins the value.
+		mtime := info.ModTime().UTC()
+
 		switch {
 		case d.Type()&fs.ModeSymlink != 0:
 			link, lerr := os.Readlink(path)
@@ -309,14 +317,16 @@ func collectExportEntries(src string) ([]exportEntry, error) {
 				abs:       path,
 				rel:       rel,
 				mode:      info.Mode().Perm(),
+				mtime:     mtime,
 				isSymlink: true,
 				linkTo:    filepath.ToSlash(link),
 			})
 		case d.IsDir():
 			out = append(out, exportEntry{
-				abs:  path,
-				rel:  rel,
-				mode: info.Mode().Perm(),
+				abs:   path,
+				rel:   rel,
+				mode:  info.Mode().Perm(),
+				mtime: mtime,
 			})
 		case info.Mode().IsRegular():
 			out = append(out, exportEntry{
@@ -324,6 +334,7 @@ func collectExportEntries(src string) ([]exportEntry, error) {
 				rel:       rel,
 				mode:      info.Mode().Perm(),
 				size:      info.Size(),
+				mtime:     mtime,
 				isRegular: true,
 			})
 		default:
@@ -367,7 +378,7 @@ func writeSourceEntry(tw *tar.Writer, e exportEntry, renderedBytes map[string][]
 			Mode:     int64(e.mode),
 			Typeflag: tar.TypeSymlink,
 			Linkname: e.linkTo,
-			ModTime:  stableModTime(e.abs),
+			ModTime:  e.mtime,
 			Format:   tar.FormatPAX,
 		}
 		return tw.WriteHeader(hdr)
@@ -378,7 +389,7 @@ func writeSourceEntry(tw *tar.Writer, e exportEntry, renderedBytes map[string][]
 			Name:     e.rel + "/",
 			Mode:     int64(e.mode),
 			Typeflag: tar.TypeDir,
-			ModTime:  stableModTime(e.abs),
+			ModTime:  e.mtime,
 			Format:   tar.FormatPAX,
 		}
 		return tw.WriteHeader(hdr)
@@ -402,7 +413,7 @@ func writeSourceEntry(tw *tar.Writer, e exportEntry, renderedBytes map[string][]
 		Mode:     int64(e.mode),
 		Size:     int64(len(payload)),
 		Typeflag: tar.TypeReg,
-		ModTime:  stableModTime(e.abs),
+		ModTime:  e.mtime,
 		Format:   tar.FormatPAX,
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
@@ -457,18 +468,6 @@ func exportHostname(override string) string {
 		return "unknown"
 	}
 	return h
-}
-
-// stableModTime returns a ModTime for tar headers. We use the on-disk
-// mtime so roundtrips preserve what the user had — but we clamp to
-// UTC to avoid tarball bytes that differ only by local timezone when
-// two machines export the same tree.
-func stableModTime(abs string) time.Time {
-	st, err := os.Stat(abs)
-	if err != nil {
-		return time.Time{}
-	}
-	return st.ModTime().UTC()
 }
 
 // nowOrZero picks now if set, otherwise time.Now().UTC(). Used for the

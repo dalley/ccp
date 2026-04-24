@@ -327,6 +327,39 @@ func TestRenderEscapeSequenceOnlyAffectsImmediateNext(t *testing.T) {
 	}
 }
 
+// TestRenderEscapeAtEndOfInput covers the edge case where {{!}} sits at
+// the very end of the input with nothing after it. The escape's
+// "strip and emit the next ref literally" rule has nothing to strip;
+// the escape marker must pass through verbatim rather than being
+// silently swallowed.
+func TestRenderEscapeAtEndOfInput(t *testing.T) {
+	r := mapResolver{}
+	in := []byte("prefix {{!}}")
+	out, err := Render(context.Background(), in, r)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if string(out) != "prefix {{!}}" {
+		t.Errorf("Render = %q, want verbatim %q", out, in)
+	}
+}
+
+// TestRenderEscapeFollowedByUnclosedOpener covers {{!}}{{  where the
+// escape is immediately followed by an opening `{{` that never closes.
+// The escape shouldn't trigger (there's no complete ref to escape), so
+// the bytes pass through verbatim.
+func TestRenderEscapeFollowedByUnclosedOpener(t *testing.T) {
+	r := mapResolver{}
+	in := []byte("{{!}}{{")
+	out, err := Render(context.Background(), in, r)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if string(out) != "{{!}}{{" {
+		t.Errorf("Render = %q, want verbatim %q", out, in)
+	}
+}
+
 func TestRenderEscapeRequiresImmediateAdjacency(t *testing.T) {
 	// `{{!}}` with whitespace before the ref is NOT an escape — escape must
 	// be immediately adjacent.
