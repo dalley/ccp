@@ -1,8 +1,10 @@
 # ccp — Claude Code Profiles
 
-Manage multiple named Claude Code configurations on one machine. Switch between them with one command, run two in parallel with shell aliases, sync them across machines via Git.
+**Profile manager for Claude Code.** Switch between work and personal Claude Code accounts with one command, run two profiles side by side, sync your configs across machines via Git.
 
-Status: **alpha** (v1 feature-complete, pre-release).
+`ccp` is like `direnv` or `pyenv`, but for `CLAUDE_CONFIG_DIR`. It manages multiple named Claude Code profiles on one machine — settings, agents, commands, hooks, skills, output-styles, keybindings, and `CLAUDE.md` — and lets you swap between them without editing files by hand. Your default `~/.claude/` is never touched; removing the shell-init line reverses everything.
+
+Status: **alpha** (v1 feature-complete, pre-release). A v2 branch in review adds auto-activation via a `.claude-profile` marker (direnv-style allow-list) and secrets separation with OS keychain + `op://` resolution — see the Roadmap section.
 
 ## What it does
 
@@ -11,6 +13,14 @@ Claude Code reads its config from `~/.claude/` (or from `$CLAUDE_CONFIG_DIR` if 
 - `ccp use work` — set a global active profile. New shells pick it up automatically.
 - `claude-work` — an optional per-profile alias that launches Claude against that profile without switching the global active. Lets you run two Claudes side-by-side.
 - `ccp exec work -- claude mcp list` — one-shot, no shell state.
+
+## Use cases
+
+- **Work vs. personal Claude Code accounts** on the same laptop — different auth, different MCP servers, different `CLAUDE.md` memory.
+- **Run two Claude Code instances in parallel** in separate terminals (`claude-work` in one, `claude-personal` in another) without their sessions clobbering each other.
+- **Sync your Claude Code setup across machines** — keep your agents, slash commands, hooks, skills, and `CLAUDE.md` in Git; clone on a new laptop and every profile is there.
+- **Try experimental profiles** (new MCP servers, draft agents, evaluation setups) without touching your daily-driver config.
+- **Team-ish workflows** — share a read-only "team" profile via Git alongside your personal one.
 
 ## Install
 

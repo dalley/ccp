@@ -1,7 +1,23 @@
 {
   "name": "@dalley/ccp",
   "version": "0.1.1",
-  "description": "Manage multiple Claude Code profiles on one machine (native binary, installed via npm)",
+  "description": "Profile manager for Claude Code. Switch between multiple Claude Code accounts/profiles on one machine, run work and personal side by side, sync configs across machines. Like direnv or pyenv, but for CLAUDE_CONFIG_DIR. Native binary, installed via npm.",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "profile-manager",
+    "profile-switcher",
+    "account-switcher",
+    "multi-account",
+    "cli",
+    "cli-tool",
+    "config-manager",
+    "claude-config-dir",
+    "direnv",
+    "dotfiles",
+    "developer-tools"
+  ],
   "bin": {
     "ccp": "bin/ccp"
   },
