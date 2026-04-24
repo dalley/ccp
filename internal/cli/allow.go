@@ -1,3 +1,5 @@
+//go:build !windows
+
 package cli
 
 import (
@@ -12,6 +14,17 @@ import (
 	"github.com/dalley/ccp/internal/paths"
 	"github.com/spf13/cobra"
 )
+
+// registerAllowCmd adds `ccp allow` and `ccp deny` to root. The Windows
+// build variant (allow_windows.go) is a no-op so root.go can call this
+// unconditionally — build-tag-gated dispatch keeps the marker-based
+// auto-activation command group out of --help on a platform where it
+// can't work. Mirrors the registerSecretCmd pattern in secret.go /
+// secret_windows.go.
+func registerAllowCmd(root *cobra.Command) {
+	root.AddCommand(newAllowCmd())
+	root.AddCommand(newDenyCmd())
+}
 
 // newAllowCmd wires `ccp allow [--status] [--json]`.
 //

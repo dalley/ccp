@@ -1,3 +1,5 @@
+//go:build !windows
+
 package cli
 
 import (
@@ -12,6 +14,15 @@ import (
 	"github.com/dalley/ccp/internal/profile"
 	"github.com/spf13/cobra"
 )
+
+// registerShellResolveDirCmd adds `ccp shell-resolve-dir` to root. The
+// Windows build variant (shell_resolve_dir_windows.go) is a no-op so
+// root.go can call this unconditionally — build-tag-gated dispatch keeps
+// the auto-activation hot-path command out of --help on a platform where
+// it can't work. Mirrors the registerSecretCmd / registerAllowCmd patterns.
+func registerShellResolveDirCmd(root *cobra.Command) {
+	root.AddCommand(newShellResolveDirCmd())
+}
 
 // newShellResolveDirCmd returns the hidden `ccp shell-resolve-dir <dir>`
 // command. This is a hot-path helper called on every `cd` by the

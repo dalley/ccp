@@ -31,7 +31,13 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newShellInitCmd())
 	root.AddCommand(newShellActiveCmd())
-	root.AddCommand(newShellResolveDirCmd())
+	// shell-resolve-dir, allow/deny, and secret are all platform-gated for
+	// the same reason: the internal machinery they wrap returns
+	// ErrUnsupportedPlatform on Windows in v2.0, and listing commands in
+	// --help on a platform where they can't work is worse than hiding them.
+	// Each register* helper is a no-op on Windows (see the *_windows.go
+	// siblings) and AddCommand(newXCmd()) on POSIX.
+	registerShellResolveDirCmd(root)
 	root.AddCommand(newProfileCmd())
 	root.AddCommand(newCurrentCmd())
 	// `ccp use <name>` is a shortcut for `ccp profile use <name>` — the
@@ -40,13 +46,7 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newExecCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newPromptCmd())
-	root.AddCommand(newAllowCmd())
-	root.AddCommand(newDenyCmd())
-	// `ccp secret` is platform-gated: the internal/secret package's Windows
-	// stubs return ErrUnsupportedPlatform for every operation, and listing
-	// commands in --help on a platform where they can't work is worse than
-	// hiding them. registerSecretCmd is a no-op on Windows (see
-	// secret_windows.go) and AddCommand(newSecretCmd()) on POSIX.
+	registerAllowCmd(root)
 	registerSecretCmd(root)
 
 	return root
