@@ -318,8 +318,11 @@ func runDeny(cmd *cobra.Command) error {
 
 // statusReport is the --json payload shape for `ccp allow --status`.
 // Field order/names are load-bearing — agent consumers parse these.
+// Marker is omitempty so the no_marker case emits a minimal payload
+// (no cosmetic `"marker": ""` line that invites misinterpretation as
+// "marker is the empty string"); callers branch on Status instead.
 type statusReport struct {
-	Marker       string `json:"marker"`
+	Marker       string `json:"marker,omitempty"`
 	Status       string `json:"status"`
 	Profile      string `json:"profile,omitempty"`
 	CurrentHash  string `json:"current_hash,omitempty"`

@@ -30,11 +30,18 @@ func newSyncPushCmd() *cobra.Command {
 			// soft warning only — the push proceeds either way. If the user
 			// is intentionally syncing a profile with ref placeholders
 			// (which render as cleartext hits), `--quiet` silences the noise.
+			//
+			// We count via profile.CountReal so informational skip entries
+			// (skipped-large / skipped-binary) don't trigger the advisory —
+			// an oversized vendored blob in the profile tree shouldn't
+			// scare the user into thinking a secret is about to leak.
 			if !quiet && s.Manifest.ActiveProfile != "" {
-				if findings, aerr := profile.Audit(s.Paths, s.Manifest.ActiveProfile); aerr == nil && len(findings) > 0 {
-					fmt.Fprintf(cmd.ErrOrStderr(),
-						"ccp: %d suspected secrets detected in profile %s; review with 'ccp profile audit'\n",
-						len(findings), s.Manifest.ActiveProfile)
+				if findings, aerr := profile.Audit(s.Paths, s.Manifest.ActiveProfile); aerr == nil {
+					if n := profile.CountReal(findings); n > 0 {
+						fmt.Fprintf(cmd.ErrOrStderr(),
+							"ccp: %d suspected secrets detected in profile %s; review with 'ccp profile audit'\n",
+							n, s.Manifest.ActiveProfile)
+					}
 				}
 			}
 

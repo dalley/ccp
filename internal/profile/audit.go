@@ -69,6 +69,27 @@ const auditEntropyThresholdHex = 3.5
 // without disabling the whole file.
 const auditIgnoreMarker = "# ccp:audit-ignore"
 
+// CountReal returns the number of findings that represent suspected
+// secrets (i.e. not informational skip entries like "skipped-large" /
+// "skipped-binary"). Callers use this to decide whether to fire
+// ErrAuditSecretsDetected — a binary blob or an oversized vendored file
+// is a notice, not a conflict.
+//
+// Single canonical helper; both the CLI audit command and the Export
+// path consume it so the skip-kind list lives in exactly one place.
+func CountReal(findings []AuditFinding) int {
+	n := 0
+	for _, f := range findings {
+		switch f.Kind {
+		case "skipped-large", "skipped-binary":
+			// info-level, not a real finding
+		default:
+			n++
+		}
+	}
+	return n
+}
+
 // escapedRefPrefix marks the literal-escape form `{{!}}{{ ... }}` — a
 // line that contains this is not flagged even if the bytes inside the
 // escape would otherwise match a detector (the user is demonstrating

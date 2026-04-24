@@ -129,9 +129,9 @@ func Export(p paths.Paths, name string, opts ExportOptions, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if opts.FailOnAudit && auditCountReal(findings) > 0 {
+		if opts.FailOnAudit && CountReal(findings) > 0 {
 			return fmt.Errorf("%w: %d suspected secret(s) in profile %s",
-				ErrAuditSecretsDetected, auditCountReal(findings), name)
+				ErrAuditSecretsDetected, CountReal(findings), name)
 		}
 		if opts.AuditAdvisory != nil {
 			*opts.AuditAdvisory = findings
@@ -480,18 +480,3 @@ func nowOrZero(now time.Time) time.Time {
 	return now.UTC()
 }
 
-// auditCountReal mirrors cli/profile_audit.go's countReal but lives in
-// the profile package so Export doesn't depend on the CLI layer. Skip
-// kinds are informational — they must not trigger ErrAuditSecretsDetected.
-func auditCountReal(findings []AuditFinding) int {
-	n := 0
-	for _, f := range findings {
-		switch f.Kind {
-		case "skipped-large", "skipped-binary":
-			// info-level, not a real finding
-		default:
-			n++
-		}
-	}
-	return n
-}

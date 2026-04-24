@@ -47,7 +47,7 @@ func newProfileAuditCmd() *cobra.Command {
 					Findings []profile.AuditFinding `json:"findings"`
 				}{
 					Profile:  name,
-					Detected: countReal(findings),
+					Detected: profile.CountReal(findings),
 					Findings: findings,
 				}
 				enc := json.NewEncoder(out)
@@ -69,7 +69,7 @@ func newProfileAuditCmd() *cobra.Command {
 			// skipped-* entries: a file we couldn't scan shouldn't
 			// trigger the conflict exit — that would cause agents
 			// to treat a binary blob as a security incident.
-			if countReal(findings) > 0 {
+			if profile.CountReal(findings) > 0 {
 				return profile.ErrAuditSecretsDetected
 			}
 			return nil
@@ -77,21 +77,4 @@ func newProfileAuditCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON {profile, detected, findings}")
 	return cmd
-}
-
-// countReal returns the number of findings that represent suspected
-// secrets (i.e. not informational skip entries). Used to decide
-// whether to fire ErrAuditSecretsDetected — a binary blob or an
-// oversized vendored file is a notice, not a conflict.
-func countReal(findings []profile.AuditFinding) int {
-	n := 0
-	for _, f := range findings {
-		switch f.Kind {
-		case "skipped-large", "skipped-binary":
-			// info-level, not a real finding
-		default:
-			n++
-		}
-	}
-	return n
 }
