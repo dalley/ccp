@@ -18,7 +18,16 @@ import (
 // the `ccp exec` refresh step. 30s is enough for op-CLI round trips on a
 // slow link; past that, something is wrong and we prefer to surface a
 // clear error over wedging the shell.
-const ExecRefreshTimeout = 30 * time.Second
+//
+// The same value is reused by `ccp profile refresh`, `ccp profile create`,
+// and `ccp profile rename` (which all call BuildSymlinks / RefreshSymlinks
+// internally) so a slow or hung `op read` can't pin the user's terminal
+// indefinitely. See the Ctx variants on profile.Profile / profile.Create
+// / profile.Rename for the plumbing.
+//
+// Declared as a var (not const) so tests can shrink the budget to keep
+// the "timeout exercised on slow op read" case fast.
+var ExecRefreshTimeout = 30 * time.Second
 
 // execRefreshCalls is a test-observable counter of how many times the
 // exec command has actually run RefreshSymlinks. Used by integration

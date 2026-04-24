@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,10 +31,18 @@ func newProfileCreateCmd() *cobra.Command {
 				return err
 			}
 
+			// Cap the BuildSymlinks that profile.Create runs internally:
+			// without this budget, a seed that contains `{{ op://… }}`
+			// refs pointing at an unreachable 1Password backend would hang
+			// `ccp profile create` on the user's terminal forever. The
+			// same timeout is used by ccp exec's refresh path.
+			ctx, cancel := context.WithTimeout(cmd.Context(), ExecRefreshTimeout)
+			defer cancel()
+
 			var pr profile.Profile
 			err = withLock(s.Paths, func() error {
 				var ierr error
-				pr, ierr = profile.Create(s.Paths, name, profile.CreateOptions{
+				pr, ierr = profile.CreateCtx(ctx, s.Paths, name, profile.CreateOptions{
 					FromCurrent: fromCurrent,
 					FromProfile: fromProfile,
 				})

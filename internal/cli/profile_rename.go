@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -22,9 +23,16 @@ func newProfileRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Cap the post-rename BuildSymlinks so a hung `op read` in a
+			// profile that happens to use `{{ op://… }}` refs can't pin
+			// `ccp profile rename` on the user's terminal. Same budget
+			// `ccp exec` uses for its pre-child refresh.
+			ctx, cancel := context.WithTimeout(cmd.Context(), ExecRefreshTimeout)
+			defer cancel()
+
 			hadAlias := false
 			err = withLockedState(s.Paths, func(s *state) error {
-				if ierr := profile.Rename(s.Paths, oldName, newName); ierr != nil {
+				if ierr := profile.RenameCtx(ctx, s.Paths, oldName, newName); ierr != nil {
 					return ierr
 				}
 				// Remove any existing alias block for the old name. Detect

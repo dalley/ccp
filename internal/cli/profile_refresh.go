@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dalley/ccp/internal/profile"
@@ -40,9 +41,14 @@ With no argument, refreshes every profile.`,
 				targets = got
 			}
 
+			// Cap ref resolution so a hung `op read` can't wedge the
+			// terminal. Same budget `ccp exec` uses.
+			ctx, cancel := context.WithTimeout(cmd.Context(), ExecRefreshTimeout)
+			defer cancel()
+
 			return withLock(s.Paths, func() error {
 				for _, pr := range targets {
-					if err := pr.RefreshSymlinks(); err != nil {
+					if err := pr.RefreshSymlinksCtx(ctx); err != nil {
 						return fmt.Errorf("refresh %s: %w", pr.Name, err)
 					}
 					fmt.Fprintf(cmd.OutOrStdout(), "Refreshed %s\n", pr.Name)
