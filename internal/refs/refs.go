@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // -----------------------------------------------------------------------------
@@ -237,6 +238,13 @@ func defaultOpRead(ctx context.Context, ref string) (string, error) {
 	cmd := exec.CommandContext(ctx, "op", "read", ref)
 	// Inherit env so OP_SERVICE_ACCOUNT_TOKEN, OP_ACCOUNT, etc. flow to op.
 	cmd.Env = os.Environ()
+	// WaitDelay bounds how long cmd.Run() blocks on pipe drainage after
+	// a context cancellation. If `op` forks a child that inherits the
+	// inherited-pipe fds, context-cancel SIGKILLs `op` but cmd.Run()
+	// would otherwise hang waiting for the grandchild to close the fd.
+	// 2s is enough slack for op to flush its own diagnostic output while
+	// keeping the worst case bounded.
+	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

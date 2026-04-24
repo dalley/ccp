@@ -190,7 +190,12 @@ func toRuntimeRel(configDir, abs string) string {
 //
 // Returns a wrapped refs.ErrSecretRefUnresolved when resolution fails.
 func renderFile(ctx context.Context, src, dst string, srcMode os.FileMode, resolver refs.Resolver, known map[string]struct{}) error {
-	b, err := os.ReadFile(src)
+	// Per-file TOCTOU defence: rejectEscapingSymlinksInSource runs before
+	// the render pass, but an attacker with write access could swap a
+	// non-escaping symlink for an escaping one between the walk and this
+	// read. O_NOFOLLOW refuses the symlink outright — see
+	// readFileNoFollow's docstring.
+	b, err := readFileNoFollow(src)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", src, err)
 	}
@@ -508,8 +513,11 @@ func buildRefDir(ctx context.Context, srcDir, runtimeDir, configDir string, reso
 			errs = append(errs, subErrs...)
 
 		default:
-			// Regular file.
-			b, rerr := os.ReadFile(srcPath)
+			// Regular file. Use O_NOFOLLOW per the same TOCTOU argument as
+			// renderFile: the initial escape-check walk is not atomic
+			// with this read, so a concurrent swap from a non-escaping
+			// symlink to an escaping one would otherwise slip through.
+			b, rerr := readFileNoFollow(srcPath)
 			if rerr != nil {
 				errs = append(errs, fmt.Errorf("read %s: %w", srcPath, rerr))
 				continue
@@ -550,8 +558,11 @@ func pruneStaleRenders(pr Profile, rtm *runtimeManifest) []error {
 		dst := filepath.Join(pr.ConfigDir, filepath.FromSlash(rel))
 		src := filepath.Join(pr.SourceDir, filepath.FromSlash(rel))
 		// If source is gone or has no refs anymore, drop the rendered
-		// file so a non-ref source can be re-symlinked.
-		b, err := os.ReadFile(src)
+		// file so a non-ref source can be re-symlinked. O_NOFOLLOW for
+		// the same TOCTOU reason as renderFile / buildRefDir — a swapped
+		// symlink here would let us mistakenly KEEP a rendered file
+		// whose source now points outside the tree.
+		b, err := readFileNoFollow(src)
 		if err != nil || !refs.HasRefs(b) {
 			if rmErr := os.Remove(dst); rmErr != nil && !os.IsNotExist(rmErr) {
 				errs = append(errs, fmt.Errorf("remove stale rendered %s: %w", dst, rmErr))
