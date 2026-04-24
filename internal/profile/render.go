@@ -3,7 +3,6 @@ package profile
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -495,19 +494,16 @@ func buildRefDir(ctx context.Context, srcDir, runtimeDir, configDir string, reso
 			}
 
 		case info.IsDir():
-			childHasRefs, herr := dirHasRefs(srcPath)
-			if herr != nil {
-				errs = append(errs, fmt.Errorf("scan %s: %w", srcPath, herr))
-				continue
-			}
-			if !childHasRefs {
-				// Wholesale symlink the subdir.
-				if lerr := ensureSymlink(srcPath, dstPath); lerr != nil {
-					errs = append(errs, lerr)
-				}
-				continue
-			}
-			// Refs under here → materialize a real dir and recurse.
+			// We're already inside a buildRefDir recursion — the outer
+			// buildItemDir confirmed refs exist somewhere in this tree,
+			// so a second dirHasRefs pass on every subdir would scan
+			// each leaf twice (O(N*M) for an N-wide tree of M-deep
+			// files). Instead we always materialize a real dir and
+			// recurse; the per-file refs.HasRefs check below decides
+			// render-vs-symlink at the leaf. The cost of symlinking a
+			// ref-free subtree leaf-by-leaf instead of wholesale is
+			// trivial (one readdir + N symlinks), while the saving on
+			// the ref-bearing case scales with tree depth.
 			subErrs := buildRefDir(ctx, srcPath, dstPath, configDir, resolver, rtm)
 			errs = append(errs, subErrs...)
 
@@ -580,11 +576,4 @@ func ContextOrBackground(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
-}
-
-// unresolvedIs is a tiny helper so callers can branch on "any of these
-// errors wraps ErrSecretRefUnresolved". Kept here so the import of
-// refs.ErrSecretRefUnresolved lives in one place.
-func unresolvedIs(err error) bool {
-	return errors.Is(err, refs.ErrSecretRefUnresolved)
 }

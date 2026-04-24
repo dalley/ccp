@@ -20,9 +20,13 @@ import (
 // Existing files/links at the target path that DON'T match are returned as
 // an error — we never silently overwrite user content.
 //
-// Error policy: per-item failures are accumulated and returned as a
-// joined error so a single unresolved ref doesn't abort the whole build.
-// The successfully-rendered/linked subset is durable on disk regardless.
+// Per-item render failures are accumulated via errors.Join and returned
+// after processing all items — successful renders persist even when
+// others fail. This matches Key Decision 8 in the v2.0 plan: a single
+// unresolved keychain ref on file A must not block the render of file B.
+// The joined error unwraps to refs.ErrSecretRefUnresolved via errors.Is
+// for callers that want to distinguish "unresolved refs" from other
+// classes of failure.
 //
 // BuildSymlinks delegates to BuildSymlinksCtx(context.Background()).
 func (pr Profile) BuildSymlinks() error {

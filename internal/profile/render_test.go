@@ -556,7 +556,6 @@ func TestUnresolvedRefIsSentinel(t *testing.T) {
 	if !errors.Is(err, refs.ErrSecretRefUnresolved) {
 		t.Errorf("not wrapped: %v", err)
 	}
-	_ = unresolvedIs // keep the helper used
 }
 
 // ensure paths package reference is retained (the test file uses it

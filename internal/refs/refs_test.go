@@ -149,6 +149,40 @@ func TestHasAnyRefsSkipsNonexistent(t *testing.T) {
 	}
 }
 
+// TestHasAnyRefsSkipsUnreadableFileAndFindsLater plants a 0000-mode file
+// under the scan root AND a later ref-bearing file; the scan must skip
+// the unreadable leaf (permission denied) rather than aborting, and
+// still find the real ref in the sibling. Regression guard for the fix
+// where walkFn used to `return err` from ReadFile and stop the whole
+// walk on the first unreadable file.
+func TestHasAnyRefsSkipsUnreadableFileAndFindsLater(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file perms; skip")
+	}
+	dir := t.TempDir()
+	unreadable := filepath.Join(dir, "00-unreadable.txt")
+	if err := os.WriteFile(unreadable, []byte("whatever"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
+
+	// "99-" so lexical ordering puts it after the unreadable — WalkDir
+	// is deterministic in sort order, so this confirms we kept going
+	// past the failure.
+	hasRef := filepath.Join(dir, "99-real.sh")
+	if err := os.WriteFile(hasRef, []byte("TOKEN={{ keychain:TOKEN }}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := HasAnyRefs(dir)
+	if err != nil {
+		t.Fatalf("HasAnyRefs unexpectedly errored: %v", err)
+	}
+	if !ok {
+		t.Fatal("HasAnyRefs = false despite a ref-bearing sibling next to an unreadable file")
+	}
+}
+
 // --- Render: happy paths -------------------------------------------------
 
 type mapResolver struct {

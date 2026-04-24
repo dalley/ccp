@@ -49,6 +49,13 @@ func HasRefs(b []byte) bool {
 // HasAnyRefs walks dir and returns true on the first regular file whose
 // contents contain a ref. Used by `ccp exec` to decide whether a profile
 // requires secret resolution before launching.
+//
+// Unreadable files (permission denied, transient I/O) are skipped rather
+// than aborting the walk — a file we can't read isn't ref-bearing for
+// our purposes, and blocking on one unreadable leaf would make the whole
+// scan a hostage to noise in the tree. The outer walk error path still
+// fires on directory-level failures (bad dir, corrupt fs) which are
+// real scan failures.
 func HasAnyRefs(dir string) (bool, error) {
 	found := false
 	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -58,11 +65,11 @@ func HasAnyRefs(dir string) (bool, error) {
 		if d.IsDir() || !d.Type().IsRegular() {
 			return nil
 		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			// Unreadable files shouldn't block the scan — surface the error
-			// only if no ref has been found by the end.
-			return err
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			// Unreadable leaf: skip, keep walking. Not ref-bearing as
+			// far as this scan can see.
+			return nil
 		}
 		if HasRefs(b) {
 			found = true
