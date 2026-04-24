@@ -96,6 +96,63 @@ func TestUseShellIsSafeToEvalInSh(t *testing.T) {
 	}
 }
 
+// TestMigrationAdvisorySuppressedOnSaveFailure verifies the
+// advisory-after-save invariant: if manifest.Save fails, the new
+// LastSeenVersion is not persisted, so the advisory must NOT fire —
+// otherwise the user sees it, dismisses it, and then sees it again
+// on the next `ccp use` because the stamp didn't land.
+//
+// We simulate save failure by stripping write permission from the
+// config dir AFTER `ccp profile create` has set everything up. Save
+// calls os.CreateTemp on filepath.Dir(path), which fails EACCES when
+// the directory is read+execute-only. Skipped as root (chmod is
+// advisory for euid 0).
+func TestMigrationAdvisorySuppressedOnSaveFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("cannot test chmod as root")
+	}
+	setupCLI(t)
+
+	// Create + first-run `use` to stamp the manifest with a known
+	// version. We run the "real" advisory flow first so the test is
+	// meaningful: after this, LastSeenVersion == Version, and any
+	// subsequent `use` at that same Version would normally be silent.
+	if _, _, err := runCLI(t, "", "profile", "create", "work"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, err := runCLI(t, "", "use", "work"); err != nil {
+		t.Fatalf("first use (stamp): %v", err)
+	}
+
+	// Flip Version so there IS a prior/current mismatch, meaning an
+	// advisory would normally fire.
+	origVersion := Version
+	Version = "9.9.9"
+	t.Cleanup(func() { Version = origVersion })
+
+	// Make the manifest's parent dir read+execute only. The lock file
+	// already exists (opened for rdwr, which works via file-level perms
+	// on an existing file), but manifest.Save's CreateTemp on this dir
+	// will fail EACCES.
+	configDir := filepath.Join(os.Getenv("CCP_ROOT"), ".config", "ccp")
+	if err := os.Chmod(configDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(configDir, 0o700) })
+
+	_, stderr, err := runCLI(t, "", "use", "work")
+	// use MUST fail — withLockedState surfaces save errors.
+	if err == nil {
+		t.Fatalf("use expected to fail when manifest.Save fails, got nil err\nstderr:\n%s", stderr)
+	}
+	// And the advisory MUST NOT have been emitted — that's the whole
+	// point of gating it behind save success.
+	if strings.Contains(stderr, "v2.0 adds secrets separation") ||
+		strings.Contains(stderr, "upgraded from") {
+		t.Errorf("advisory leaked despite manifest.Save failure; stderr:\n%s", stderr)
+	}
+}
+
 // TestMigrationAdvisoryOnGeneralUpgrade covers the non-empty-but-different
 // branch of emitMigrationAdvisory: a manifest already stamped with some
 // older version should get the brief one-liner, not the verbose v2 message.

@@ -43,7 +43,18 @@ func newProfileUseCmd() *cobra.Command {
 				return nil
 			}
 
-			var priorVersion string
+			// We compute shouldEmit INSIDE the locked state (priorVersion
+			// is read there) but EMIT the advisory only AFTER the lock
+			// releases AND manifest.Save has succeeded. If manifest.Save
+			// fails, withLockedState returns a non-nil error and we fall
+			// out via the `return err` below — the advisory stays silent,
+			// which is the correct behavior because LastSeenVersion was
+			// not persisted and the user would see the advisory again on
+			// the next `ccp use`. Guards Finding #6 from round 2 review.
+			var (
+				priorVersion string
+				shouldEmit   bool
+			)
 			err = withLockedState(s.Paths, func(s *state) error {
 				// Re-check existence under the lock: a concurrent delete
 				// could have removed the profile between loadState and
@@ -52,6 +63,7 @@ func newProfileUseCmd() *cobra.Command {
 					return fmt.Errorf("profile %q not found (create it with: ccp profile create %s)", name, name)
 				}
 				priorVersion = s.Manifest.LastSeenVersion
+				shouldEmit = priorVersion != Version
 				s.Manifest.ActiveProfile = name
 				// Stamp the current binary version so subsequent `ccp use`
 				// invocations know we've already greeted this manifest. The
@@ -67,10 +79,12 @@ func newProfileUseCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Active profile: %s\n", name)
 			fmt.Fprintln(cmd.OutOrStdout(),
 				"New shells will pick this up. In this shell, run: eval \"$(ccp use "+name+" --shell)\"")
-			// Migration advisory — stderr only, non-fatal. Fires at most
-			// once per manifest because withLockedState saves the new
-			// LastSeenVersion on success.
-			emitMigrationAdvisory(cmd.ErrOrStderr(), priorVersion, Version)
+			// Migration advisory — stderr only, non-fatal. Gated by
+			// shouldEmit (set only when we observed a version mismatch
+			// AND successfully persisted the new stamp above).
+			if shouldEmit {
+				emitMigrationAdvisory(cmd.ErrOrStderr(), priorVersion, Version)
+			}
 			return nil
 		},
 	}
@@ -88,7 +102,10 @@ func newProfileUseCmd() *cobra.Command {
 //     short; the user has already seen the v2 message and just needs a
 //     reminder that `ccp profile audit` exists.
 //
-// Silent on match (the common case once everyone's on v2+).
+// Callers are responsible for gating on "versions differ AND save
+// succeeded" — see the shouldEmit variable in the use command. The
+// equality short-circuit here is belt-and-suspenders so a future caller
+// can't accidentally fire the advisory when it shouldn't.
 func emitMigrationAdvisory(w io.Writer, priorVersion, currentVersion string) {
 	if priorVersion == currentVersion {
 		return
