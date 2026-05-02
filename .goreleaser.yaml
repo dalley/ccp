@@ -66,7 +66,7 @@ brews:
       name: homebrew-ccp
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/dalley/ccp"
-    description: "Manage multiple Claude Code profiles on one machine"
+    description: "Profile manager for Claude Code. Switch between multiple Claude Code accounts/profiles on one machine."
     license: "MIT"
     install: |
       bin.install "ccp"
