@@ -710,4 +710,3 @@ func TestShellResolveDirNoStderrEverEmitted(t *testing.T) {
 		})
 	}
 }
-

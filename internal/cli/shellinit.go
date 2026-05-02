@@ -60,18 +60,18 @@ func writeShellInit(w io.Writer, shell string, p paths.Paths) error {
 //
 // Two logical layers:
 //
-//   1. Legacy activation (`__ccp_activate_legacy`): the v1 behavior — exports
-//      CLAUDE_CONFIG_DIR from $CCP_PROFILE or `ccp shell-active`. Unchanged
-//      semantics; still invoked as the fallback when auto-activation is off
-//      or yields no result.
+//  1. Legacy activation (`__ccp_activate_legacy`): the v1 behavior — exports
+//     CLAUDE_CONFIG_DIR from $CCP_PROFILE or `ccp shell-active`. Unchanged
+//     semantics; still invoked as the fallback when auto-activation is off
+//     or yields no result.
 //
-//   2. Auto-activation (`__ccp_activate`): walks up from $PWD for a
-//      `.claude-profile` marker in pure shell, consults a per-shell env-var
-//      cache, and only forks `ccp shell-resolve-dir` on a cache miss. The
-//      resolver emits shellQuote-wrapped KEY=value lines we `eval`. On
-//      `CCP_AUTO_WARN` (drift/unallowed) we emit a one-shot stderr warning
-//      guarded by a per-marker env var so each shell session warns at most
-//      once per marker.
+//  2. Auto-activation (`__ccp_activate`): walks up from $PWD for a
+//     `.claude-profile` marker in pure shell, consults a per-shell env-var
+//     cache, and only forks `ccp shell-resolve-dir` on a cache miss. The
+//     resolver emits shellQuote-wrapped KEY=value lines we `eval`. On
+//     `CCP_AUTO_WARN` (drift/unallowed) we emit a one-shot stderr warning
+//     guarded by a per-marker env var so each shell session warns at most
+//     once per marker.
 //
 // The walk-up is bounded at 64 ancestors (depth defense against a pathological
 // symlink loop or a crafted deep tree). We never mutate the user's $PWD during
@@ -85,6 +85,7 @@ func writeShellInit(w io.Writer, shell string, p paths.Paths) error {
 // The per-shell chpwd hook is registered after __ccp_activate is defined:
 //   - zsh: `add-zsh-hook chpwd __ccp_activate`
 //   - bash: `PROMPT_COMMAND="__ccp_activate;${PROMPT_COMMAND}"`
+//
 // and __ccp_activate is also called once inline to handle the startup shell.
 //
 // CLAUDE_CONFIG_DIR escape-hatch semantics match v1: if it was set by anything

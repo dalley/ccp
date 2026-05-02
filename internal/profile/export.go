@@ -478,4 +478,3 @@ func nowOrZero(now time.Time) time.Time {
 	}
 	return now.UTC()
 }
-

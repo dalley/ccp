@@ -214,8 +214,8 @@ func TestHashRejectsNonRegular(t *testing.T) {
 func TestReadNameValid(t *testing.T) {
 	cases := []struct{ content, want string }{
 		{"work\n", "work"},
-		{"work", "work"},              // missing trailing \n is allowed
-		{"a\n", "a"},                  // one-character minimum
+		{"work", "work"}, // missing trailing \n is allowed
+		{"a\n", "a"},     // one-character minimum
 		{"a" + strings.Repeat("b", 62) + "\n", "a" + strings.Repeat("b", 62)},
 		{"my-profile-1_test\n", "my-profile-1_test"},
 	}

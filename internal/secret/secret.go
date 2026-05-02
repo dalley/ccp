@@ -66,9 +66,9 @@ var keyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // goes. Defaults to os.Stderr so humans see it; tests swap it via
 // SetFallbackWarnWriter. Mirrors internal/sync/auth.go:SetAuthWarnWriter.
 var (
-	warnWriter    io.Writer = os.Stderr
-	warnWriterMu  sync.Mutex
-	fallbackWarn  sync.Once
+	warnWriter   io.Writer = os.Stderr
+	warnWriterMu sync.Mutex
+	fallbackWarn sync.Once
 )
 
 // SetFallbackWarnWriter redirects the "keychain unavailable" warning for

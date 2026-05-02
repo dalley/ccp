@@ -367,8 +367,8 @@ func TestValidateKeyRejectsBadInputs(t *testing.T) {
 		{"empty", ""},
 		{"slash", "foo/bar"},
 		{"colon", "foo:bar"},
-		{"dash", "foo-bar"},           // dashes rejected by keyRe
-		{"dot", "foo.bar"},            // dots rejected
+		{"dash", "foo-bar"}, // dashes rejected by keyRe
+		{"dot", "foo.bar"},  // dots rejected
 		{"leading digit", "1FOO"},
 		{"control char", "foo\x01bar"},
 		{"newline", "foo\nbar"},
