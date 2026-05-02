@@ -26,6 +26,13 @@ type Manifest struct {
 	SchemaVersion int    `toml:"schema_version"`
 	ActiveProfile string `toml:"active_profile,omitempty"`
 	DefaultShell  string `toml:"default_shell,omitempty"`
+	// LastSeenVersion is the ccp binary version that last wrote this
+	// manifest. Used to drive one-shot migration advisories (e.g. the v2
+	// secrets-separation prompt on first post-upgrade `ccp use`). This
+	// field is additive — schema_version stays at 1; a v1 binary reading
+	// a manifest with this field simply drops it on round-trip, which is
+	// the desired behavior (no migration advisory on a downgrade).
+	LastSeenVersion string `toml:"last_seen_version,omitempty"`
 }
 
 // Default returns a manifest suitable for a fresh install.

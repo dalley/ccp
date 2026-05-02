@@ -52,9 +52,21 @@ func TestInitRepoMakesInitialCommit(t *testing.T) {
 	// manifest.toml, if created later, must be gitignored — we don't need
 	// a full test, just verify the ignore file lists it.
 	b, _ := os.ReadFile(filepath.Join(p.ConfigDir, ".gitignore"))
-	for _, want := range []string{"manifest.toml", "backups/", "lock", "secrets/"} {
+	for _, want := range []string{"manifest.toml", "backups/", "lock", "allowlist.toml", "secrets/", "runtime-manifest/"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf(".gitignore missing %q", want)
+		}
+	}
+}
+
+// TestGitignoreContentsIncludesV2Entries pins the v2 additions
+// (allowlist.toml and runtime-manifest/) so a refactor that drops either
+// entry is caught immediately. Both are machine-local state that must
+// never enter the sync repo.
+func TestGitignoreContentsIncludesV2Entries(t *testing.T) {
+	for _, want := range []string{"/allowlist.toml", "/runtime-manifest/"} {
+		if !strings.Contains(GitignoreContents, want) {
+			t.Errorf("GitignoreContents missing %q\n---\n%s", want, GitignoreContents)
 		}
 	}
 }

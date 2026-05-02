@@ -164,7 +164,7 @@ func TestUseShellEmitsExports(t *testing.T) {
 	if !strings.Contains(out, "export CLAUDE_CONFIG_DIR=") {
 		t.Errorf("missing export: %s", out)
 	}
-	if !strings.Contains(out, "export CCP_PROFILE=work") {
+	if !strings.Contains(out, "export CCP_PROFILE='work'") {
 		t.Errorf("missing profile export: %s", out)
 	}
 }

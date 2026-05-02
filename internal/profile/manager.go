@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -27,7 +28,21 @@ var ErrNotFound = errors.New("profile not found")
 
 // Create materializes a new profile: source dir + runtime dir + symlinks.
 // Does not touch any shellrc — call InstallAlias separately if desired.
+//
+// Delegates to CreateCtx(context.Background(), …) so existing callers
+// (tests, scripts) keep working unchanged. New callers that want to cap
+// the time spent resolving {{ op://… }} refs during the initial
+// BuildSymlinks should use CreateCtx directly — the CLI wires
+// cli.ExecRefreshTimeout (30s) through.
 func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
+	return CreateCtx(context.Background(), p, name, opts)
+}
+
+// CreateCtx is Create with an explicit context. The context is forwarded
+// to BuildSymlinksCtx so a hung `op read` during first-render cannot pin
+// the user's terminal indefinitely. See ExecRefreshTimeout in
+// internal/cli/exec.go for the budget choice.
+func CreateCtx(ctx context.Context, p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 	if err := ValidateName(name); err != nil {
 		return Profile{}, err
 	}
@@ -78,7 +93,7 @@ func Create(p paths.Paths, name string, opts CreateOptions) (Profile, error) {
 		}
 	}
 
-	if err := pr.BuildSymlinks(); err != nil {
+	if err := pr.BuildSymlinksCtx(ctx); err != nil {
 		return pr, err
 	}
 
@@ -188,7 +203,18 @@ func Delete(p paths.Paths, name string, backupDir string) (string, error) {
 
 // Rename moves a profile's source and runtime dirs to a new name. It does
 // NOT touch alias blocks — callers update those in the CLI layer.
+//
+// Delegates to RenameCtx(context.Background(), …) so existing callers
+// keep working. The CLI wires cli.ExecRefreshTimeout through RenameCtx so
+// a hung ref resolution during the post-rename BuildSymlinks can't wedge
+// the user's terminal.
 func Rename(p paths.Paths, oldName, newName string) error {
+	return RenameCtx(context.Background(), p, oldName, newName)
+}
+
+// RenameCtx is Rename with an explicit context. Forwarded to the
+// post-rename BuildSymlinksCtx.
+func RenameCtx(ctx context.Context, p paths.Paths, oldName, newName string) error {
 	if err := ValidateName(oldName); err != nil {
 		return fmt.Errorf("old name: %w", err)
 	}
@@ -227,5 +253,5 @@ func Rename(p paths.Paths, oldName, newName string) error {
 	if err := dst.RemoveSymlinks(); err != nil {
 		return err
 	}
-	return dst.BuildSymlinks()
+	return dst.BuildSymlinksCtx(ctx)
 }

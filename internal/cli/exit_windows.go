@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io/fs"
 
+	"github.com/dalley/ccp/internal/allowlist"
 	"github.com/dalley/ccp/internal/fslock"
 	"github.com/dalley/ccp/internal/profile"
+	"github.com/dalley/ccp/internal/refs"
+	"github.com/dalley/ccp/internal/secret"
 	ccpsync "github.com/dalley/ccp/internal/sync"
 )
 
@@ -28,6 +31,23 @@ func ExitCodeFor(err error) int {
 	case errors.Is(err, profile.ErrDiffFound):
 		return ExitConflict
 	case errors.Is(err, profile.ErrDoctorFailed):
+		return ExitState
+	case errors.Is(err, profile.ErrAuditSecretsDetected):
+		return ExitConflict
+	case errors.Is(err, secret.ErrSecretNotFound):
+		return ExitUser
+	case errors.Is(err, secret.ErrKeychainLocked),
+		errors.Is(err, secret.ErrUnsupportedPlatform):
+		return ExitState
+	case errors.Is(err, refs.ErrSecretRefUnresolved),
+		errors.Is(err, refs.ErrUnsupportedPlatform):
+		return ExitState
+	case errors.Is(err, allowlist.ErrMarkerNotAllowed),
+		errors.Is(err, allowlist.ErrMarkerHashMismatch):
+		return ExitConflict
+	case errors.Is(err, allowlist.ErrInvalidMarker):
+		return ExitUser
+	case errors.Is(err, allowlist.ErrUnsupportedPlatform):
 		return ExitState
 	case errors.Is(err, ccpsync.ErrDirtyWorkingTree):
 		return ExitConflict
