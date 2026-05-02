@@ -410,9 +410,11 @@ func TestShellQuoteCorpus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			quoted := shellQuote(tc.in)
 			// Build a snippet that sets VAR=<quoted> then prints $VAR
-			// with a trailing sentinel so a trailing newline in the
-			// input doesn't get stripped by $(...) semantics.
-			script := "VAR=" + quoted + "\nprintf '%s\\x00' \"$VAR\"\n"
+			// with a trailing NUL sentinel so a trailing newline in
+			// the input doesn't get stripped by $(...) semantics. Use
+			// octal \000 — POSIX-portable; \xHH is a bash extension
+			// dash (Ubuntu /bin/sh) does not interpret.
+			script := "VAR=" + quoted + "\nprintf '%s\\000' \"$VAR\"\n"
 			cmd := exec.Command("sh", "-c", script)
 			cmd.Env = []string{"PATH=/usr/bin:/bin"}
 			out, err := cmd.CombinedOutput()
